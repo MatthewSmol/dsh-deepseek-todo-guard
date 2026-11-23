@@ -10,7 +10,8 @@
     "./client": "./dist/client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
-    "./host": "./dist/host/index.js"
+    "./host": "./dist/host/index.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/index.js",
