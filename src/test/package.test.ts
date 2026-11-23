@@ -23,11 +23,20 @@ test('package.json: имя, точка входа и клиентская пол
   assert.ok(pkg.files.includes('icon.svg'))
 })
 
-test('cordis.patch.yml вставляет одну строку todo-watch', async () => {
+test('cordis.patch.yml: полный пресет standard и строка сторожа', async () => {
   const patch = await readFile(join(root, 'cordis.patch.yml'), 'utf8')
+  // Сторож и его конфигурация.
   assert.match(patch, /id: todo-watch/)
-  assert.match(patch, /name: '@local\/dsh-todo-watch'/)
+  assert.match(patch, /name: '@local\/dsh-todo-watch\/host'/)
   assert.match(patch, /checkIntervalSeconds: 30/)
+  // Пресет переиздан целиком: обязательные части штатного пресета на месте,
+  // иначе новая сессия не создаётся (agent-preset/invalid).
+  assert.match(patch, /id: preset-standard/)
+  assert.match(patch, /PlanModeConfig|section: \|/)
+  assert.match(patch, /provider: spawn/)
+  // Инструмент TODO заменён на нашу копию с объявлением события проверки.
+  assert.match(patch, /name: '@local\/dsh-todo-watch'/)
+  assert.doesNotMatch(patch, /name: '@deepseek-ai\/dsh-tool-todo'/)
 })
 
 test('локали несут заголовок, описание и страницу плагина', async () => {
