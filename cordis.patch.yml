@@ -128,11 +128,13 @@
                 name: '@deepseek-ai/dsh-tool-workflow'
           - id: tool-ask-user
             name: '@deepseek-ai/dsh-tool-ask-user'
+          # Инструмент todo_write из нашего пакета: объявляет события лога
+          # todo/write и todo-watch/check (в штатном пакете второго нет).
           - id: tool-todo
             name: '@local/dsh-todo-watch'
             config:
               allowParallelInProgress: true
-              checkIntervalSeconds: 30
+              mode: tool
           - id: tool-web
             name: '@deepseek-ai/dsh-tool-web'
             config:
@@ -150,12 +152,18 @@
             disabled: true
 
 - insert:
-    # Сторож: проверки раз в 30 секунд и подсказки агенту.
+    # Сторож: проверки раз в 30 секунд и подсказки агенту. Имя строки — имя
+    # пакета (без подпути): сканер клиентских модулей DSH рассматривает только
+    # строки-пакеты, иначе клиентская половина не попадает в страницу и пункта
+    # в сайдбаре не будет.
     - id: todo-watch
-      name: '@local/dsh-todo-watch/host'
+      name: '@local/dsh-todo-watch'
       config:
+        allowParallelInProgress: true
+        mode: watcher
         checkIntervalSeconds: 30
         staleAfterMinutes: 10
         remindAllCompleted: true
         remindMissingList: true
         remindOnlyWhenIdle: true
+        diagnostics: true

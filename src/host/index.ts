@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
+import { writeFileSync } from 'node:fs'
 import {
   DEFAULTS,
   renderText,
@@ -51,6 +52,8 @@ export interface Config {
   remindMissingList?: boolean
   /** Подсказывать только простаивающему агенту. */
   remindOnlyWhenIdle?: boolean
+  /** Писать диагностику клиентских модулей в файл (для разбора проблем). */
+  diagnostics?: boolean
 }
 
 /** Схема конфигурации для редактора настроек DSH и проверки строки патча. */
@@ -60,6 +63,7 @@ export const Config = Schema.object<Config>({
   remindAllCompleted: Schema.boolean().default(DEFAULTS.remindAllCompleted),
   remindMissingList: Schema.boolean().default(DEFAULTS.remindMissingList),
   remindOnlyWhenIdle: Schema.boolean().default(DEFAULTS.remindOnlyWhenIdle),
+  diagnostics: Schema.boolean().default(false),
 })
 
 /** Ключ собственной проекции с итогом проверок. */
@@ -182,8 +186,17 @@ function readLog(session: any): { turn: number; snapshot: TodoSnapshot | null; w
  * @param ctx - контекст плагина.
  * @param config - конфигурация строки патча.
  */
+/** Флаг: сторож уже запущен в этом процессе (строк пакета может быть несколько). */
+let started = false
+
 export function apply(ctx: Context, config: Config = {}): void {
+  if (started) {
+    ctx.logger.info('todo-watch: сторож уже запущен, повторная строка пропущена')
+    return
+  }
+  started = true
   const settings: WatcherConfig = resolveConfig(config)
+  const diagnostics = config.diagnostics === true
   const books = new Map<string, AgentBook>()
   const intervalMs = settings.checkIntervalSeconds * 1000
 
@@ -238,8 +251,38 @@ export function apply(ctx: Context, config: Config = {}): void {
     ctx.logger.warn(`todo-watch: проекция ${CHECK_PROJECTION_KEY} не зарегистрирована: ${String(error)}`)
   })
 
+  /**
+   * Записать в файл состав клиентских модулей, который DSH отдал странице.
+   * Нужно для разбора: клиентская половина попадает в boot-payload только при
+   * старте сервера, и без этого списка нельзя понять, попал ли ряд плагина.
+   */
+  const dumpDiagnostics = (): void => {
+    try {
+      const graph = (ctx as any).get?.('clientModules')?.graph?.()
+      const loaderNames = (() => {
+        try {
+          return [...((ctx as any).loader?.entries?.() ?? [])]
+            .map((entry: any) => entry?.options?.name)
+            .filter((name: unknown): name is string => typeof name === 'string' && name.includes('todo'))
+        } catch { return [] }
+      })()
+      const payload = {
+        at: new Date().toISOString(),
+        loaderNames,
+        graphRev: graph?.rev ?? null,
+        entries: (graph?.entries ?? []).map((entry: any) => entry.id),
+        todoWatchEntry: (graph?.entries ?? []).find((entry: any) => entry.id === '@local/dsh-todo-watch') ?? null,
+        clientPath: (ctx as any).get?.('clientModules')?.clientPath?.('@local/dsh-todo-watch') ?? null,
+      }
+      writeFileSync(new URL('../../.diag-graph.json', import.meta.url), `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+    } catch (error) {
+      ctx.logger.warn(`todo-watch: диагностика не записана: ${String(error)}`)
+    }
+  }
+
   /** Один тик: проверить всех живых агентов; ошибка одной сессии не мешает остальным. */
   const tick = (): void => {
+    if (diagnostics) dumpDiagnostics()
     const now = Date.now()
     for (const agent of Array.from(ctx.agents as Iterable<AgentFace>)) {
       try {
@@ -284,6 +327,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
     }
   }
+
+  // Диагностика при старте: файл появится сразу после загрузки строки.
+  if (diagnostics) dumpDiagnostics()
 
   // Книги живут ровно столько же, сколько агенты.
   ctx.on<{ agent: AgentFace }>('agent/created', (payload) => { bookFor(payload.agent) })

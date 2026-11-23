@@ -6,6 +6,9 @@ dist.test/
 # Кэш npm, которым ставились зависимости в этом каталоге
 .npm-cache/
 
+# Диагностика клиентских модулей (diagnostics: true)
+.diag-graph.json
+
 # Служебное
 *.log
 .DS_Store

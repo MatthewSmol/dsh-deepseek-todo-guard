@@ -58,7 +58,8 @@ test('todo-write: проекция todos объявлена zod-схемой', a
   const { ctx, tools, projections } = fakeContext()
   const built = new URL('../../../dist/index.js', import.meta.url).href
   const source = await import(built) as { apply(ctx: unknown, config: unknown): Promise<void> }
-  await source.apply(ctx, { allowParallelInProgress: true })
+  // Режим `tool`: проверяется только инструмент, сторож в этом тесте не нужен.
+  await source.apply(ctx, { allowParallelInProgress: true, mode: 'tool' })
   assert.equal(projections.length, 1)
   const definition = projections[0]
   assert.equal(definition.key, 'todos')

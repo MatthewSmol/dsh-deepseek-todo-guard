@@ -27,7 +27,12 @@ test('cordis.patch.yml: полный пресет standard и строка ст�
   const patch = await readFile(join(root, 'cordis.patch.yml'), 'utf8')
   // Сторож и его конфигурация.
   assert.match(patch, /id: todo-watch/)
-  assert.match(patch, /name: '@local\/dsh-todo-watch\/host'/)
+  // Имя строки обязано быть именем пакета: сканер клиентских модулей берёт
+  // только строки-пакеты, иначе клиентская половина не попадает в страницу.
+  assert.match(patch, /name: '@local\/dsh-todo-watch'\n\s+config:/)
+  assert.doesNotMatch(patch, /@local\/dsh-todo-watch\/host/)
+  assert.match(patch, /mode: watcher/)
+  assert.match(patch, /mode: tool/)
   assert.match(patch, /checkIntervalSeconds: 30/)
   // Пресет переиздан целиком: обязательные части штатного пресета на месте,
   // иначе новая сессия не создаётся (agent-preset/invalid).

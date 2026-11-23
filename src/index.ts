@@ -13,6 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { apply as applyWatcher, type Config as WatcherConfig } from './host/index.js'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
 import type { TodoItem } from './watch/types.js'
@@ -24,21 +25,50 @@ import './signature/todo-watch-check/index.js'
 /** Имя плагина: строка `todo-write` заменяет штатный инструмент. */
 export const name = 'todo-write'
 
-/** Обязательные сервисы: реестр инструментов и проекции сессий. */
-export const inject = ['tools', 'sessionProjections']
+/** Обязательные сервисы: инструменты, проекции и реестр агентов сторожа. */
+export const inject = ['tools', 'sessionProjections', 'agents']
 
-/** Конфигурация строки: параллельные задачи плюс поле-якорь для обновления. */
+/**
+ * Что включает строка пакета.
+ *
+ * Пакет ставится двумя строками, и обе называются `@local/dsh-todo-watch`:
+ * одна живёт в патче плагина и включает сторожа, вторая — в пресете агента и
+ * даёт инструмент `todo_write`. Имя строки обязано быть именем пакета: сканер
+ * клиентских модулей DSH рассматривает только строки с именем пакета, а не
+ * подпути, поэтому `@local/dsh-todo-watch/host` остался бы без клиентской
+ * половины и без пункта в сайдбаре.
+ */
+export type WatchMode = 'all' | 'tool' | 'watcher'
+
+/** Конфигурация строки: инструмент, сторож или всё вместе. */
 export interface Config {
   /** Можно ли держать несколько задач в статусе in_progress одновременно. */
   allowParallelInProgress: boolean
-  /** Интервал сторожа, с — для наглядности строки; на инструмент не влияет. */
+  /** Интервал сторожа, с. */
   checkIntervalSeconds?: number
+  /** Порог устаревания списка, мин (0 — выключено). */
+  staleAfterMinutes?: number
+  /** Подсказывать про весь выполненный список при оставшейся работе. */
+  remindAllCompleted?: boolean
+  /** Подсказывать, когда новый ход идёт без списка. */
+  remindMissingList?: boolean
+  /** Подсказывать только простаивающему агенту. */
+  remindOnlyWhenIdle?: boolean
+  /** Писать диагностику клиентских модулей в файл. */
+  diagnostics?: boolean
+  /** Что включает строка: по умолчанию всё. */
+  mode?: WatchMode
 }
 
 /** Схема конфигурации строки патча — Schemastery (её DSH читает у экспорта). */
 export const Config = Schema.object<Config>({
   allowParallelInProgress: Schema.boolean().required(),
   checkIntervalSeconds: Schema.number().min(5).max(600).default(30),
+  staleAfterMinutes: Schema.number().min(0).max(600).default(10),
+  remindAllCompleted: Schema.boolean().default(true),
+  remindMissingList: Schema.boolean().default(true),
+  remindOnlyWhenIdle: Schema.boolean().default(true),
+  diagnostics: Schema.boolean().default(false),
 })
 
 /** Три допустимых статуса задачи. */
@@ -98,6 +128,17 @@ function toTodoList(raw: Array<{ content: string; status: string }>, allowParall
  * @param config - конфигурация строки патча.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  const mode = config.mode ?? 'all'
+  if (mode !== 'watcher') await applyTool(ctx, config)
+  if (mode !== 'tool') applyWatcher(ctx as any, config as unknown as WatcherConfig)
+}
+
+/**
+ * Зарегистрировать инструмент `todo_write` и проекцию `todos`.
+ * @param ctx - контекст плагина.
+ * @param config - конфигурация строки патча.
+ */
+async function applyTool(ctx: Context, config: Config): Promise<void> {
   const allowParallel = config.allowParallelInProgress
   await ctx.sessionProjections.register<string, TodoItem[] | null>({
     key: 'todos',
