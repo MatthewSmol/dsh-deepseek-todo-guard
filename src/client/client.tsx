@@ -15,7 +15,7 @@ import { en, ru, zh } from './locale.js'
 const NS = 'todo-watch'
 const PANEL_ID = 'todo-watch'
 
-/** Эффективная конфигурация по умолчанию: её показывает панель, пока строка патча не задала свою. */
+/** Эффективная конфигурация по умолчанию: её показывает панель в отсутствие настройки. */
 const DEFAULT_PANEL_CONFIG = { checkIntervalSeconds: 30, staleAfterMinutes: 10 }
 
 /** Иконка пункта сайдбара: чеклист с кружком часов. */
@@ -46,10 +46,17 @@ function makePanel(t: (key: string, params?: Record<string, unknown>) => string)
  * @param ctx - клиентский контекст плагина.
  */
 function apply(ctx: any): void {
-  // Словари живут вместе с плагином.
-  ctx.effect(() => ctx.locale.register(NS, { ru, en, zh }), 'todo-watch: словари')
+  // Регистрация идёт шагами с метками: если браузерная половина падает,
+  // в консоли DSH видно, на каком шаге, а не просто «модуль не загрузился».
+  try {
+    console.log('[todo-watch] словари')
+    ctx.effect(() => ctx.locale.register(NS, { ru, en, zh }), 'todo-watch: словари')
+  } catch (error) {
+    console.error('[todo-watch] словари не зарегистрированы', error)
+  }
   const t = ctx.locale.bind(NS) as (key: string, params?: Record<string, unknown>) => string
   const Panel = makePanel(t)
+  console.log('[todo-watch] регистрирую панель и пункт сайдбара')
 
   // Панель в главном окне: тот же ключ, что у пункта сайдбара.
   ctx.slots.inject('main', () =>
