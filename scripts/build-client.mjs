@@ -32,10 +32,16 @@ const raw = await readFile(rawPath, 'utf8').catch(() => fail(`нет файла 
 if (/^\s*(?:import|export)\s/m.test(raw)) fail('в собранном клиенте остался синтаксис модулей')
 if (!raw.startsWith('(function(') && !raw.startsWith('(function()')) fail('вывод vite — не IIFE')
 if (!raw.includes('__ModuleLoader__')) fail('в бандле потерян вызов загрузчика модулей DSH')
-// React обязан идти из загрузчика DSH, а не из бандла: ровно одна фабрика.
-const reactCalls = raw.match(/__todoWatchReact/g)?.length ?? 0
-if (reactCalls !== 1) fail(`ожидалась ровно одна ссылка на require('react'), найдено ${reactCalls}`)
-if (/import\s*\{[^}]*createElement[^}]*\}\s*from\s*["']react/.test(raw)) fail('React попал в бандл')
+// React обязан идти из загрузчика DSH, а не из бандла: фабрика модуля кладёт
+// его в мост (`__todoWatchReact`), а импортов пакета в бандле быть не должно.
+if (!raw.includes('__todoWatchReact')) fail('в бандле нет моста к React из загрузчика DSH')
+// Минификатор превращает require('react') в вызов параметра фабрики: ищем
+// строку 'react' рядом с запросом модуля.
+if (!/["']react["']/.test(raw)) fail('фабрика не запрашивает React у загрузчика')
+if (/from\s*["']react["']/.test(raw)) fail('React попал в бандл как модуль')
+// Ни одна внешняя переменная не должна оставаться неопределённой: IIFE
+// вызывается без аргументов.
+if (/\)\([A-Za-z_$][\w$]*\);?\s*$/.test(raw.trim())) fail('IIFE вызывается с неопределённой глобальной переменной')
 if (!raw.includes(CSS_MARKER)) fail('CSS не встроен в бандл')
 if (raw.includes('process.env')) fail('в браузерный бандл утёк process.env')
 if (raw.includes('sourceMappingURL')) fail('в бандле осталась ссылка на source map')

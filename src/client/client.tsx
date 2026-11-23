@@ -72,7 +72,10 @@ function apply(ctx: any): void {
 
 window.__ModuleLoader__.load({
   id: '@local/dsh-todo-watch',
-  factory() {
+  factory(require) {
+    // React страницы приходит только отсюда; мост (react-bridge.ts) читает
+    // его из globalThis, чтобы бандл не тащил вторую копию React.
+    ;(globalThis as Record<string, unknown>).__todoWatchReact = require('react')
     return { inject: ['slots', 'locale'], apply }
   },
 })
