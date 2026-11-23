@@ -1,0 +1,65 @@
+{
+  "name": "@local/dsh-todo-watch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Сторож TODO для DSH: следит за списком задач в сессии, проверяет его раз в 30 секунд и подсказывает агенту, когда список устарел или забыт.",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/index.js",
+    "./client": "./dist/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./host": "./dist/host/index.js"
+  },
+  "files": [
+    "dist/index.js",
+    "dist/host/index.js",
+    "dist/watch/*.js",
+    "dist/client.js",
+    "dist/client.meta.json",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "docs"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck:host": "tsc -p tsconfig.json --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
+    "typecheck": "npm run typecheck:host && npm run typecheck:client",
+    "build:host": "tsc -p tsconfig.build.json",
+    "build:host:fix": "node scripts/fix-imports.mjs",
+    "build:host:min": "node scripts/minify-host.mjs",
+    "build:host:events": "node scripts/check-events.mjs",
+    "build:client": "vite build --config vite.config.mts",
+    "build:client:pack": "node scripts/build-client.mjs",
+    "build": "npm run clean && npm run build:host && npm run build:host:min && npm run build:host:events && npm run build:client && npm run build:client:pack && npm run build:host:fix",
+    "test": "npm run typecheck && rm -rf dist.test && tsc -p tsconfig.test.json && node --test dist.test/src/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "terser": "^5.36.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.3.8"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-session"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.19.0"
+  }
+}

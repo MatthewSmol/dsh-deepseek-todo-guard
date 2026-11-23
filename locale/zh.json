@@ -1,0 +1,8 @@
+{
+  "meta": {
+    "title": "TODO 守护",
+    "description": "守护会话任务清单：每 30 秒检查一次 TODO，并在清单过期、全部完成或新一轮缺少清单时提醒智能体。新增左侧栏入口和任务/检查日志面板。",
+    "detail": "docs/DETAIL.md"
+  },
+  "nav": "TODO 守护"
+}

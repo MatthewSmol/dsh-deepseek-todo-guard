@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Сторож TODO">
+  <defs>
+    <linearGradient id="tw-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2430"/>
+      <stop offset="1" stop-color="#101722"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tw-bg)"/>
+  <path d="M12 18h20M12 30h15M12 42h18" stroke="#e7eef6" stroke-width="4" stroke-linecap="round"/>
+  <path d="M12 18l-0.01 0M25 30.5h-0.01M15 42.5h-0.01" stroke="none"/>
+  <circle cx="46" cy="38" r="13" fill="none" stroke="#f2b44a" stroke-width="4"/>
+  <path d="M46 30.5V38l5.5 3.4" fill="none" stroke="#f2b44a" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="17" cy="18" r="3.2" fill="#47b26b"/>
+  <circle cx="17" cy="30" r="3.2" fill="#47b26b"/>
+  <circle cx="17" cy="42" r="3.2" fill="none" stroke="#7f8fa3" stroke-width="2"/>
+</svg>

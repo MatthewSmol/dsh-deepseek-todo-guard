@@ -1,0 +1,83 @@
+# Слой патча пакета «Сторож TODO».
+#
+# 1. Заменяет строку tool-todo в пресетах агентов, чтобы плагин `todo-write`
+#    объявлял дополняемое событие `todo-watch/check`: DSH дописывает его в лог
+#    сессии, а штатный `todo_write` продолжает работать как раньше.
+# 2. Вставляет строку todo-watch: таймер проверок и подсказки агенту.
+#
+# Интервал и порог устаревания меняются здесь или в профиле пользователя.
+- id: preset-standard
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: standard
+    order: 1
+    plugins:
+      - id: persona
+        name: '@deepseek-ai/dsh-persona'
+        config:
+          prefix: You are a coding agent powered by the {{model}} model.
+      - id: agent-instructions
+        name: '@deepseek-ai/dsh-agent-instructions'
+        config:
+          maxBytes: 65536
+      - id: time-context
+        name: '@deepseek-ai/dsh-time-context'
+      - id: tool-bash
+        name: '@deepseek-ai/dsh-tool-bash'
+        disabled: !!js process.platform === 'win32'
+      - id: tool-pwsh
+        name: '@deepseek-ai/dsh-tool-pwsh'
+        disabled: !!js process.platform !== 'win32'
+      - id: tool-fs
+        name: '@deepseek-ai/dsh-tool-fs'
+        config:
+          applyPatch: false
+      - id: tool-fs-search
+        name: '@deepseek-ai/dsh-tool-fs-search'
+        config:
+          sampleOverCapGlobResults: false
+      - id: tool-jobs
+        name: '@deepseek-ai/dsh-tool-jobs'
+      - id: tool-schedule
+        name: '@deepseek-ai/dsh-tool-schedule'
+      - id: skill-filesystem
+        name: '@deepseek-ai/dsh-skill-filesystem'
+      - id: skill-usage
+        name: '@deepseek-ai/dsh-skill-usage'
+      - id: tool-agent
+        name: '@deepseek-ai/dsh-tool-agent'
+      - id: tool-subagent
+        name: '@deepseek-ai/dsh-tool-subagent'
+      - id: tool-subagent-fork
+        name: '@deepseek-ai/dsh-tool-subagent-fork'
+      - id: tool-plan
+        name: '@deepseek-ai/dsh-tool-plan'
+      - id: plan-mode
+        name: '@deepseek-ai/dsh-plan-mode'
+      - id: tool-goal
+        name: '@deepseek-ai/dsh-tool-goal'
+      - id: tool-workflow
+        name: '@deepseek-ai/dsh-tool-workflow'
+      - id: tool-ask-user
+        name: '@deepseek-ai/dsh-tool-ask-user'
+      - id: tool-todo
+        name: '@deepseek-ai/dsh-tool-todo'
+        config:
+          allowParallelInProgress: true
+
+- insert:
+    # Инструмент todo_write со объявленным событием todo-watch/check.
+    - id: todo-write
+      name: '@local/dsh-todo-watch'
+      config:
+        allowParallelInProgress: true
+        checkIntervalSeconds: 30
+    # Сторож: проверки раз в 30 секунд и подсказки агенту.
+    - id: todo-watch
+      name: '@local/dsh-todo-watch/host'
+      config:
+        checkIntervalSeconds: 30
+        staleAfterMinutes: 10
+        remindAllCompleted: true
+        remindMissingList: true
+        remindOnlyWhenIdle: true

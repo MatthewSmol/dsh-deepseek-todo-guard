@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist.test",
+    "noUnusedLocals": false
+  },
+  "files": [
+    "src/test/watcher.test.ts",
+    "src/test/package.test.ts",
+    "src/test/host.test.ts"
+  ]
+}

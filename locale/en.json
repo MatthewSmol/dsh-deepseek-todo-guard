@@ -1,0 +1,8 @@
+{
+  "meta": {
+    "title": "TODO watcher",
+    "description": "Keeps the session task list current: every 30 seconds it checks the TODO list and nudges the agent when the list is stale, fully completed, or missing for a new turn. Adds a left sidebar entry and a panel with tasks and the check log.",
+    "detail": "docs/DETAIL.md"
+  },
+  "nav": "TODO watcher"
+}
