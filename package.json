@@ -60,6 +60,7 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.5",
     "@deepseek-ai/schemastery": "^3.19.0"
   }
 }
