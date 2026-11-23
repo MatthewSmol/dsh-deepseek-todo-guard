@@ -120,34 +120,36 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       },
     },
     output: {
+      // Корень схемы результата не может нести `required`: авторы схемы
+      // задают обязательность полей внутри `properties`, компилятор DSH сам
+      // собирает `required` на уровне объекта (как у штатного tool-todo).
       schema: {
         type: 'object',
         additionalProperties: false,
         properties: {
           todos: {
             type: 'array',
+            required: true,
             items: {
               type: 'object',
               additionalProperties: false,
               properties: {
-                content: { type: 'string' },
-                status: { type: 'string', enum: [...STATUSES] },
+                content: { type: 'string', required: true },
+                status: { type: 'string', required: true, enum: [...STATUSES] },
               },
-              required: ['content', 'status'],
             },
           },
           counts: {
             type: 'object',
             additionalProperties: false,
+            required: true,
             properties: {
-              pending: { type: 'integer' },
-              inProgress: { type: 'integer' },
-              completed: { type: 'integer' },
+              pending: { type: 'integer', required: true },
+              inProgress: { type: 'integer', required: true },
+              completed: { type: 'integer', required: true },
             },
-            required: ['pending', 'inProgress', 'completed'],
           },
         },
-        required: ['todos', 'counts'],
       },
       render: (_args: unknown, value: { counts: { pending: number; inProgress: number; completed: number } }) => [{
         type: 'text',
