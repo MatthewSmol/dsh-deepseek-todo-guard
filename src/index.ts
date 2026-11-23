@@ -10,9 +10,11 @@
  * Параметр `checkIntervalSeconds` ничего не меняет для инструмента: он нужен
  * только чтобы в строке патча было видно, с каким интервалом работает сторож.
  */
-import { Context } from '@deepseek-ai/cordis'
-import z from '@deepseek-ai/schemastery'
+import type { Context } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { z as zod } from 'zod'
+import type { ZodType } from 'zod'
 import type { TodoItem } from './watch/types.js'
 // Импорты без использования — боковые эффекты: объявления событий лога
 // должны попасть в загруженный модуль.
@@ -33,14 +35,27 @@ export interface Config {
   checkIntervalSeconds?: number
 }
 
-/** Схема конфигурации строки патча. */
-export const Config = z.object<Config>({
-  allowParallelInProgress: z.boolean().required(),
-  checkIntervalSeconds: z.number().min(5).max(600).default(30),
+/** Схема конфигурации строки патча — Schemastery (её DSH читает у экспорта). */
+export const Config = Schema.object<Config>({
+  allowParallelInProgress: Schema.boolean().required(),
+  checkIntervalSeconds: Schema.number().min(5).max(600).default(30),
 })
 
 /** Три допустимых статуса задачи. */
 const STATUSES = ['pending', 'in_progress', 'completed'] as const
+
+/**
+ * Схема проекции `todos` для sessionProjections — строго zod: DSH проверяет
+ * сохранённое состояние и клиентское значение вызовом `.parse`. Schemastery
+ * здесь не подходит, хотя Config — именно Schemastery.
+ */
+const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
+  zod.array(zod.object({
+    content: zod.string(),
+    status: zod.union([zod.literal('pending'), zod.literal('in_progress'), zod.literal('completed')]),
+  })),
+  zod.null(),
+])
 
 /** Описание инструмента для модели, слово в слово как у штатного todo_write. */
 function describe(allowParallel: boolean): string {
@@ -86,14 +101,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const allowParallel = config.allowParallelInProgress
   await ctx.sessionProjections.register<string, TodoItem[] | null>({
     key: 'todos',
-    stateSchema: z.any(),
+    stateSchema: todosProjectionSchema,
     init: () => null,
     apply: (state, event) => {
       if (event.type === 'todo/write') return (event.data as { todos: TodoItem[] }).todos
       if (event.type === 'turn/start') return null
       return state
     },
-    wire: { viewSchema: z.any(), view: (state: TodoItem[] | null) => state, summary: false },
+    wire: { viewSchema: todosProjectionSchema, view: (state: TodoItem[] | null) => state, summary: false },
     stateVersion: 2,
   })
   ctx.tools.register(defineTool({

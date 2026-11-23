@@ -88,6 +88,8 @@ test('apply: подсказка stale уходит один раз и пишет
     source.apply(ctx, { checkIntervalSeconds: 5, staleAfterMinutes: 10 })
     assert.equal(registrations.length, 1)
     assert.equal((registrations[0] as any).key, 'todo-watch/last-check')
+    // DSH проверяет сохранённое состояние вызовом .parse: схема обязана быть zod.
+    assert.equal(typeof (registrations[0] as any).stateSchema?.parse, 'function')
     assert.equal(timers.length, 1)
     timers[0]()
     assert.equal(injected.length, 1)

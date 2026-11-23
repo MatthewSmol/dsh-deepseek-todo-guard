@@ -16,9 +16,11 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-// Schemastery отдаёт единственный экспорт по умолчанию — фабрику схем:
-// z.number(), z.boolean(), z.object({...}) и z.any().
+// Schemastery — только для Config: DSH читает схемы строки патча по этому
+// экспорту. Проекции сессий требуют zod (см. checkSchema ниже).
 import Schema from '@deepseek-ai/schemastery'
+import { z as zod } from 'zod'
+import type { ZodType } from 'zod'
 import {
   DEFAULTS,
   renderText,
@@ -80,6 +82,23 @@ export interface CheckRecord {
   /** Напоминаний отправлено за жизнь сессии. */
   readonly sentTotal: number
 }
+
+/**
+ * Схема записи проверки для sessionProjections — строго zod: DSH проверяет
+ * сохранённое состояние и клиентское значение вызовом `.parse`. Schemastery
+ * здесь не подходит, хотя Config — именно Schemastery.
+ */
+const checkSchema: ZodType<CheckRecord> = zod.object({
+  at: zod.number(),
+  turn: zod.number(),
+  reason: zod.union([
+    zod.literal('stale'), zod.literal('all-completed'), zod.literal('no-todo'), zod.null(),
+  ]),
+  sent: zod.boolean(),
+  active: zod.number(),
+  completed: zod.number(),
+  sentTotal: zod.number(),
+})
 
 /** Минимальное лицо агента, которое нужно сторожу. */
 interface AgentFace {
@@ -195,7 +214,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // ключом `todo-watch/last-check` с той же формой, что CheckRecord.
   void ctx.sessionProjections.register<string, CheckRecord>({
     key: CHECK_PROJECTION_KEY,
-    stateSchema: Schema.any(),
+    stateSchema: checkSchema,
     init: emptyCheck,
     apply: (state, event) => {
       if (event.type === 'todo-watch/check') {
