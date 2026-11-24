@@ -129,6 +129,28 @@ export function resolveSettings(config: Config = {}): Settings {
   }
 }
 
+/**
+ * Прочитать живых агентов из реестра.
+ *
+ * `ctx.agents` — это `AgentRegistry` из dsh-agent: у него есть `list()` и
+ * `get(id)`, но нет `Symbol.iterator`, поэтому `Array.from(ctx.agents)` молча
+ * даёт пустой массив. Итератор поддерживается как запасной вариант для других
+ * сборок.
+ * @param registry - сервис `agents`.
+ * @returns живые агенты.
+ */
+export function listAgents(registry: unknown): any[] {
+  const service = registry as any
+  if (typeof service?.list === 'function') {
+    const items = service.list()
+    return Array.isArray(items) ? items : Array.from(items ?? [])
+  }
+  if (service != null && typeof service[Symbol.iterator] === 'function') {
+    return Array.from(service as Iterable<any>)
+  }
+  return []
+}
+
 /** Живое лицо агента, которое нужно сторожу. */
 interface AgentFace {
   readonly id: string
@@ -168,7 +190,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         note,
         intervalMs: settings.intervalMs,
         curator: settings.curator,
-        agents: [...(ctx.agents as Iterable<unknown>)].length,
+        agents: listAgents(ctx.agents).length,
       }
       writeFileSync(new URL('../.watch-alive.json', import.meta.url), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
     } catch { /* маячок не должен мешать работе */ }
@@ -292,7 +314,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   /** Один проход по всем живым агентам. */
   const sweep = (): void => {
-    for (const agent of Array.from(ctx.agents as Iterable<AgentFace>)) {
+    const agents = listAgents(ctx.agents) as AgentFace[]
+    for (const agent of agents) {
       void service(agent).catch((error: unknown) => {
         ctx.logger.warn(`todo-watch: проверка ${agent.id} не удалась: ${String(error)}`)
       })
@@ -310,7 +333,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Конец хода: сразу отметить выполненное, не дожидаясь тика.
   ctx.on<unknown>('session/event', (session: any, event: any) => {
     if (event?.type !== 'turn/end') return
-    const agent = Array.from(ctx.agents as Iterable<AgentFace>).find(item => item.id === session?.id)
+    const agent = (listAgents(ctx.agents) as AgentFace[]).find(item => item.id === session?.id)
     if (agent === undefined) return
     try {
       const view = readView(agent.session)
