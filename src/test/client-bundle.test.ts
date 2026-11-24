@@ -116,10 +116,19 @@ test('бандл: словари ru/en/zh с заголовком', async () => 
   const entry = dictionaries.find((item: any) => item.namespace === 'todo-watch')
   assert.ok(entry)
   assert.deepEqual(Object.keys(entry.dicts).sort(), ['en', 'ru', 'zh'])
+  // Набор ключей одинаков во всех языках: недоперевод виден сразу.
+  const keysOf = (language: string): string[] => Object.keys(entry.dicts[language]).sort()
+  assert.deepEqual(keysOf('ru'), keysOf('en'))
+  assert.deepEqual(keysOf('ru'), keysOf('zh'))
   for (const language of ['ru', 'en', 'zh']) {
-    assert.equal(typeof entry.dicts[language].title, 'string')
-    assert.equal(typeof entry.dicts[language].offline, 'string')
+    for (const [key, value] of Object.entries(entry.dicts[language])) {
+      assert.equal(typeof value, 'string', `${language}.${key}: не строка`)
+      assert.ok((value as string).length > 0, `${language}.${key}: пустая строка`)
+    }
   }
+  // Русский и английский интерфейс действительно переведены, а не скопированы.
+  assert.equal(entry.dicts.ru.title, 'Сторож TODO')
+  assert.equal(entry.dicts.en.title, 'TODO watcher')
 })
 
 test('бандл: панель без привязки страницы сообщает «нет связи»', async () => {

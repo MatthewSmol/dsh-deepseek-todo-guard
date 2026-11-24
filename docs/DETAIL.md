@@ -1,102 +1,99 @@
-# Сторож TODO
+# TODO watcher — design and limitations
 
-Плагин DeepSeek Harness, который сам поддерживает плашку задач TODO над полем
-ввода.
+**English** · [Русский](DETAIL.ru.md)
 
-## Где эта плашка и почему плагин не рисует её сам
+## Why the plugin draws nothing itself
 
-Панель «Задачи» — штатная часть DSH (`@deepseek-ai/dsh-client-ui-conversation`,
-`conversation.input.dock`, id `todo`). Она стоит над полем ввода, свёрнута по
-умолчанию, показывает задачи текущего раунда и читает проекцию `todos`. Проекцию
-наполняет событие `todo/write`, которое обычно пишет инструмент `todo_write`
-агента. Панель исчезает, когда список пуст, и обнуляется на `turn/start` — то
-есть между ходами её нет, пока агент снова не запишет список.
+The «Tasks» plaque is stock DSH UI (`@deepseek-ai/dsh-client-ui-conversation`,
+slot `conversation.input.dock`, id `todo`). It sits above the composer, starts
+collapsed, shows the tasks of the current round and reads the `todos` projection.
+The projection is filled by the `todo/write` session event, normally written by
+the agent's `todo_write` tool. The panel disappears while the list is empty and is
+reset on `turn/start`, so between turns there is nothing to show until the list is
+written again.
 
-Поэтому плагин не создаёт свою панель и ничего не рисует: он следит, чтобы
-событие `todo/write` появлялось вовремя. Собственный интерфейс только дублировал
-бы штатный и уводил пользователя от него.
+The plugin therefore renders no panel of its own: it makes sure `todo/write`
+appears in time. A second panel would only duplicate the stock one.
 
-## Проверка раз в 30 секунд
+## The 30 second check
 
-Единый таймер обходит живых агентов (сессии субагентов пропускаются по
-умолчанию) и для каждого читает лог: номер хода, был ли `todo/write` в этом
-ходу, когда он был, тексты пользователя и ассистента, имена вызванных
-инструментов, открыт ли ход.
+One timer walks the live agents (`ctx.agents` is an `AgentRegistry` with
+`list()`; it is not iterable) and reads each session log: turn number, whether
+`todo/write` happened in this turn, when it happened, human and assistant texts,
+tool names, whether the turn is still open.
 
-| Ситуация | Действие | Причина в логах |
+| Situation | Action | Reason in the journal |
 |---|---|---|
-| в ходе ещё не было `todo/write`, списка нет | создать | `в этом ходе списка нет` |
-| в ходе нет `todo/write`, но список остался от прошлого хода | заменить | `список относится к прошлому ходу` |
-| ход закрылся, в списке есть незавершённые | отметить выполненные | `ход завершён, есть незавершённые` |
-| список есть, но не обновлялся дольше `staleAfterMinutes`, пока идёт ход | обновить | `список давно не обновлялся` |
-| список свеж | не трогать | `список актуален` |
+| no `todo/write` in this turn, no list | create | `в этом ходе списка нет` |
+| no `todo/write` in this turn, list from a previous turn | refresh | `список относится к прошлому ходу` |
+| turn closed, unfinished items remain | promote to `completed` | `ход завершён, есть незавершённые` |
+| list exists but older than `staleAfterMinutes` while working | refresh | `список давно не обновлялся` |
+| list is fresh | do nothing | `список актуален` |
 
-Конец хода (`turn/end`) обрабатывается сразу, не дожидаясь тика: галочки
-появляются без задержки в 30 секунд.
+`turn/end` is handled immediately, without waiting for the tick, so checkmarks
+appear without a 30 second delay.
 
-## Откуда берутся формулировки
+## Journal in the sidebar
 
-### Модель сессии (по умолчанию)
+Every nudge is recorded: time, session id and its title (from `session/title`),
+action (`create`/`refresh`/`promote`), wording source (`model`/`heuristic`/`none`)
+and item count. The last 50 entries live in memory and in `.nudges.json` next to
+the package, so the history survives a restart.
 
-Одноразовый вызов `ctx.llm` тем же маршрутом, что и основной запрос сессии
-(`session.requestHeader().config`), с отдельными ограничениями:
+The panel is the plugin's client half:
 
-- не чаще одного вызова на сессию (`llmMinIntervalSeconds`, по умолчанию 60 с);
-- один вызов в полёте на сессию; при выгрузке агента вызов отменяется;
-- таймаут (`llmTimeoutMs`, 20 с) и лимит токенов (`llmMaxOutputTokens`, 400);
-- вход — компактный JSON: запрос человека, последние ответы ассистента, имена
-  инструментов и текущий список (обрезка до нескольких КБ).
+- sidebar entry `sidebar.panellist` with id `todo-watch-log`, order 45, a
+  checklist-with-clock icon;
+- panel `main` under the same key: title, the line “latest N · updated …”, and one
+  card per entry (time, session, action, source, item count, reason);
+- the panel polls `GET /todo-watch/nudges` every 5 seconds.
 
-Модель возвращает строго `{"todos":[{"content":"…","status":"pending|in_progress|completed"}]}`.
-Ответ нормализуется: обрезка строк до 120 символов, не больше `maxItems`,
-без повторов, допустимые статусы, не больше одной задачи «в работе», если
-параллелизм запрещён. Мусор и таймауты отбрасываются — лучше оставить прежний
-список, чем показать выдуманный.
+The route is registered on the host `webServer` service and protected by a
+per-process one-off token: the host injects the global
+`__TODO_WATCH__ = { endpoint, token, historySize }` into the page HTML through
+`webserver/index-inject`, and the panel sends the token in the
+`x-todo-watch-token` header. Responses carry `cache-control: no-store`; POST
+returns 405. After a `dsh web` restart the token changes, so an old tab shows “No
+connection to the watcher” until it is reloaded.
 
-### Эвристика (запасной путь)
+## Where the wording comes from
 
-Если модель недоступна, не настроена (`curator: heuristic`) или ответила
-негодным текстом:
+### Session model (default)
 
-- существующий список сохраняет формулировки, а статусы двигаются по ходу:
-  закрытый ход — всё `completed`, открытый — первая незавершённая задача
-  становится `in_progress`;
-- если списка нет — пункты берутся из запроса человека (нумерованные и
-  маркированные строки, иначе строка целиком), первый помечается «в работе»;
-- пустой запрос даёт одну общую задачу, чтобы плашка не была пустой.
+A one-off `ctx.llm` call on the same route as the session's main request
+(`session.requestHeader().config`), with limits:
 
-## Запись в лог
+- at most one call per session (`llmMinIntervalSeconds`, 60 s by default);
+- one call in flight per session; the call is aborted when the agent is disposed;
+- timeout (`llmTimeoutMs`, 20 s) and token cap (`llmMaxOutputTokens`, 400);
+- input is compact JSON: the human request, the latest assistant texts, tool names
+  and the current list (bounded to a few KB).
 
-`session.append('todo/write', { todos })` — только когда список реально
-изменился (сравнение по содержимому и статусам). Ошибки записи логируются и не
-повторяются на следующем тике. Событие не будит агента и не попадает в его
-контекст модели: это log-only состояние интерфейса.
+The model must answer strict
+`{"todos":[{"content":"…","status":"pending|in_progress|completed"}]}`. The answer
+is normalized: lines trimmed to 120 characters, at most `maxItems`, no duplicates,
+valid statuses, at most one `in_progress` when parallelism is off. Garbage and
+timeouts are discarded — keeping the previous list beats inventing a new one.
 
-## Журнал в сайдбаре
+### Heuristic fallback
 
-Каждая подсказка записывается в журнал: время, id сессии и её название (из
-события `session/title`), действие (`create`/`refresh`/`promote`), источник
-формулировок (`model`/`heuristic`/`none`) и число задач. Последние 50 записей
-хранятся в памяти и в файле `.nudges.json` рядом с пакетом, поэтому история
-переживает перезапуск.
+If the model is unavailable, not configured (`curator: heuristic`), timed out or
+answered garbage:
 
-Панель — клиентская половина плагина:
+- an existing list keeps its wording and only moves statuses: a closed turn makes
+  everything `completed`, an open one makes the first unfinished item
+  `in_progress`;
+- with no list, items come from the human request (numbered or bulleted lines,
+  otherwise the whole line) and the first is marked in progress;
+- an empty request yields one generic item so the plaque is never empty.
 
-- пункт `sidebar.panellist` с id `todo-watch-log`, порядок 45, иконка-чеклист с
-  часами;
-- панель `main` с тем же ключом: заголовок, строка «последние N · обновлено …»,
-  карточки записей (время, сессия, действие, источник, число задач, причина);
-- опрос маршрута `GET /todo-watch/nudges` каждые 5 секунд.
+## Log writes
 
-Маршрут регистрируется в хост-сервисе `webServer` и защищён одноразовым токеном
-процесса: хост подставляет в HTML страницы глобал
-`__TODO_WATCH__ = { endpoint, token, historySize }` через событие
-`webserver/index-inject`, а панель отправляет токен заголовком
-`x-todo-watch-token`. Ответы идут с `cache-control: no-store`, POST даёт 405.
-После перезапуска `dsh web` токен меняется, поэтому старую вкладку нужно
-обновить — иначе панель покажет «Нет связи со сторожем».
+`session.append('todo/write', { todos })`, only when the list actually changed.
+Append failures are logged and not retried on the next tick. The event is log-only
+UI state: it does not wake the agent and does not enter the model context.
 
-## Настройки
+## Settings
 
 ```yaml
 - id: todo-watch
@@ -104,7 +101,7 @@
     checkIntervalSeconds: 30
     staleAfterMinutes: 10
     curator: llm
-    llmProvider: ''            # по умолчанию маршрут сессии
+    llmProvider: ''            # defaults to the session route
     llmModel: ''
     llmMinIntervalSeconds: 60
     llmTimeoutMs: 20000
@@ -113,28 +110,28 @@
     allowParallelInProgress: true
     promoteCompletedOnTurnEnd: true
     includeSubagents: false
-    historySize: 5             # сколько последних подсказок в панели (1–50)
+    historySize: 5
 ```
 
-## Проверка, что новая версия загружена
+## Verifying that the new version is loaded
 
-При каждом тике сторож пишет рядом с пакетом короткий файл `.watch-alive.json`:
+On every tick the watcher writes `.watch-alive.json` next to the package:
 
 ```json
 { "at": "2026-11-24T05:23:40.689Z", "version": 2, "note": "тик",
-  "intervalMs": 30000, "curator": "llm", "agents": 4 }
+  "intervalMs": 30000, "curator": "llm", "agents": 4, "nudges": 3 }
 ```
 
-Если файла нет или в нём старая дата — работает предыдущий модуль: Node кэширует
-ESM, поэтому смена кода требует перезапуска `dsh web`. Поле `agents` показывает,
-сколько живых агентов обошёл сторож на последнем тике.
+If the file is missing or stale, the previous module is still running: Node caches
+ESM, so a code change needs a `dsh web` restart. `agents` is how many live agents
+the last tick walked; `nudges` is the journal size.
 
-## Ограничения
+## Limitations
 
-- Плашка существует только у пресетов, где объявлена проекция `todos`
-  (`standard`, `ptc`, `cordis`). В `minimal` плагин молчит.
-- Плагин работает с живыми сессиями: закрытая сессия обслуживается, когда её
-  снова откроют.
-- Вызовы модели расходуют токены; частоту ограничивает
-  `llmMinIntervalSeconds`, полностью отключает `curator: heuristic`.
-- Правка bundle-патча применяется после перезапуска `dsh web`.
+- The plaque exists only for presets that declare the `todos` projection
+  (`standard`, `ptc`, `cordis`). With `minimal` the plugin stays silent.
+- The plugin works with live sessions; a closed session is served once it is
+  opened again.
+- Model calls cost tokens; `llmMinIntervalSeconds` limits the rate and
+  `curator: heuristic` disables them completely.
+- A bundle patch change is applied after a `dsh web` restart.

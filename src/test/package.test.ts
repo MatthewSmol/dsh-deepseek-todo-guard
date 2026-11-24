@@ -37,13 +37,44 @@ test('cordis.patch.yml: одна строка сторожа, без подме�
   assert.doesNotMatch(patch, /@local\/dsh-todo-watch\//)
 })
 
-test('локали несут заголовок, описание и страницу плагина', async () => {
+test('локали несут заголовок, описание и существующую страницу плагина', async () => {
+  const detailByLocale: Record<string, string> = {
+    ru: 'docs/DETAIL.ru.md',
+    en: 'docs/DETAIL.md',
+    zh: 'docs/DETAIL.md',
+  }
   for (const locale of ['ru', 'en', 'zh']) {
     const dict = await readJson(join(root, 'locale', `${locale}.json`))
     assert.ok(dict.meta?.title, `${locale}: нет meta.title`)
     assert.ok(dict.meta?.description, `${locale}: нет meta.description`)
-    assert.equal(dict.meta.detail, 'docs/DETAIL.md')
+    assert.equal(dict.meta.detail, detailByLocale[locale], `${locale}: неверная страница плагина`)
+    await stat(join(root, dict.meta.detail))
   }
+})
+
+test('локали: одинаковый набор ключей и непустые строки', async () => {
+  const read = async (locale: string): Promise<any> => readJson(join(root, 'locale', `${locale}.json`))
+  const [ru, en, zh] = await Promise.all([read('ru'), read('en'), read('zh')])
+  assert.deepEqual(Object.keys(ru).sort(), Object.keys(en).sort())
+  assert.deepEqual(Object.keys(ru).sort(), Object.keys(zh).sort())
+  for (const [code, dict] of [['ru', ru], ['en', en], ['zh', zh]] as const) {
+    assert.deepEqual(Object.keys(dict.meta).sort(), ['description', 'detail', 'title'], `${code}: поля meta`)
+    for (const value of [dict.meta.title, dict.meta.description, dict.nav]) {
+      assert.equal(typeof value, 'string')
+      assert.ok(value.length > 0, `${code}: пустая строка`)
+    }
+  }
+})
+
+test('README на английском и русском, оба ссылаются друг на друга', async () => {
+  const english = await readFile(join(root, 'README.md'), 'utf8')
+  const russian = await readFile(join(root, 'README.ru.md'), 'utf8')
+  assert.match(english, /^# TODO watcher/)
+  assert.match(russian, /^# Сторож TODO/)
+  assert.match(english, /README\.ru\.md/)
+  assert.match(russian, /\(README\.md\)/)
+  // Английский текст не должен содержать русских заголовков разделов.
+  assert.doesNotMatch(english, /^## (Что делает|Установка|Настройка)/m)
 })
 
 test('иконка — валидный маленький SVG', async () => {

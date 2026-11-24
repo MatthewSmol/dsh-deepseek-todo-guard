@@ -1,96 +1,93 @@
-# Сторож TODO
+# TODO watcher
 
-Плагин DeepSeek Harness, который держит плашку задач TODO над полем ввода
-актуальной. Это **штатная панель DSH** — она показывает задачи текущего раунда
-и читает проекцию `todos`, которую создаёт событие `todo/write`. Агент часто
-забывает завести список или обновить его, поэтому плагин делает это сам.
+**English** · [Русский](README.ru.md)
 
-## Что делает
+A DeepSeek Harness plugin that keeps the TODO plaque above the composer current.
+That plaque is **stock DSH UI** (`@deepseek-ai/dsh-client-ui-conversation`,
+`conversation.input.dock`, id `todo`): it shows the tasks of the current round
+and reads the `todos` projection, which the `todo/write` session event fills.
+Agents routinely forget to create or refresh that list, so the plugin does it
+itself.
 
-Каждые 30 секунд (настраивается) сторож проходит по живым сессиям и:
+## What it does
 
-| Ситуация | Действие |
+Every 30 seconds (configurable) the watcher walks the live sessions and:
+
+| Situation | Action |
 |---|---|
-| в текущем ходе списка нет | создаёт его по запросу человека |
-| список остался от прошлого хода | заменяет актуальным |
-| ход закончился, есть незавершённые | отмечает задачи выполненными |
-| список в ходе есть и свеж | не трогает |
+| no list in the current turn | creates one from the human request |
+| the list is left over from a previous turn | replaces it with a current one |
+| the turn ended and items are unfinished | marks the finished ones completed |
+| the list exists in this turn and is fresh | leaves it alone |
 
-Каждая подсказка попадает в журнал: время, сессия (название или короткий id),
-действие, источник формулировок и число задач. Панель «Сторож TODO» в левом
-сайдбаре показывает последние 5 записей и обновляется каждые 5 секунд. Журнал
-хранится в памяти процесса и в `.nudges.json`, поэтому переживает перезапуск.
+Every nudge goes to a journal: time, session (title or short id), action, source
+of the wording, and item count. The «TODO watcher» panel in the left sidebar
+shows the latest 5 entries and refreshes every 5 seconds. The journal lives in
+memory and in `.nudges.json`, so it survives a restart.
 
-Формулировки задач берёт модель самой сессии — тот же маршрут, что и у
-основного запроса (`session.requestHeader().config`), отдельный вызов с
-лимитом частоты (не чаще 60 с на сессию) и таймаутом. Если модель недоступна
-или ответила мусором, работает эвристика: пункты из запроса и статусы по
-прогрессу. Запись в лог делается только при реальном изменении списка.
+The plugin renders no panel of its own over the composer: it only writes
+`todo/write` in the same shape as the agent's `todo_write` tool. It adds no
+session event types and never wakes an agent.
 
-Плагин не добавляет своего интерфейса: ни сайдбара, ни собственной панели, ни
-событий своего типа. Он пишет только `todo/write` — тот же формат, что у
-инструмента `todo_write` агента.
+## Where the wording comes from
 
-## Версия 2.1.0
+- **The session model** (default): a one-off `ctx.llm` call on the same route as
+  the session's main request (`session.requestHeader().config`), at most once per
+  60 seconds per session, with a 20 second timeout and a 400 token cap. The answer
+  must be strict JSON and is normalized (≤7 items, ≤120 characters each, no
+  duplicates, at most one `in_progress` when parallelism is off).
+- **Heuristic fallback**: if the model is unavailable, not configured, timed out,
+  or answered garbage. Existing wording is kept and statuses follow progress; with
+  no list at all, items come from the request lines.
 
-- сторож сам дописывает `todo/write`, чтобы штатная плашка задач над полем ввода
-  была создана и актуальна (модель сессии, при недоступности — эвристика);
-- в левом сайдбаре снова есть пункт «Сторож TODO»: панель показывает журнал
-  последних 5 подсказок — когда, какую сессию и что именно сторож поправил.
+Writes happen only when the list actually changes.
 
-Подробности — в [docs/DETAIL.md](docs/DETAIL.md).
-
-## Установка
+## Install
 
 ```bash
 npm install && npm run build
 ```
 
-Затем **Plugins → Add plugin** (или `install_bundle` для каталога
-`/home/main/PluginTODO`) и **перезапуск `dsh web`**: правка bundle-патча
-применяется только при старте сервера.
+Then **Plugins → Add plugin** (or `install_bundle` for the `/home/main/PluginTODO`
+directory) and **restart `dsh web`**: the bundle patch and the client half are
+applied at server start only.
 
-## Настройка
+## Configure
 
 ```yaml
 - id: todo-watch
   config:
     checkIntervalSeconds: 30    # 5–600
-    staleAfterMinutes: 10       # 0 — не считать список устаревшим
+    staleAfterMinutes: 10       # 0 — never treat a list as stale
     curator: llm                # llm | heuristic
-    llmMinIntervalSeconds: 60   # не чаще одного вызова модели на сессию
+    llmProvider: ''             # defaults to the session route
+    llmModel: ''
+    llmMinIntervalSeconds: 60
     llmTimeoutMs: 20000
     llmMaxOutputTokens: 400
     maxItems: 7
     allowParallelInProgress: true
     promoteCompletedOnTurnEnd: true
     includeSubagents: false
+    historySize: 5              # entries in the sidebar panel (1–50)
 ```
 
-Можно жёстко задать маршрут модели (`llmProvider` + `llmModel`) или полностью
-отключить модель (`curator: heuristic`).
+Set `curator: heuristic` to run without model calls. See
+[docs/DETAIL.md](docs/DETAIL.md) (Russian: [docs/DETAIL.ru.md](docs/DETAIL.ru.md))
+for the full design, the HTTP endpoint, and limitations.
 
-Подробности и ограничения — в [docs/DETAIL.md](docs/DETAIL.md).
-
-## Сборка
+## Build and test
 
 ```bash
 npm run typecheck
-npm run build      # tsc → terser → проверка импортов
-npm test           # typecheck + 34 теста
+npm run build      # host: tsc → terser; client: tsc → loader wrapper → terser
+npm test           # typecheck + 67 tests
 ```
 
-Размер после минификации ≈ 11 КБ (index + модули `watch/`).
+Sizes after minification: host ≈ 14.6 KB, client ≈ 6.3 KB.
 
-## Поддержка проекта
+## Interface languages
 
-Плагин бесплатный. Если он сэкономил вам время — можно поддержать разработку.
-
-| Сеть | Адрес |
-| --- | --- |
-| BTC | `bc1qmvw20wke93dtnf0hzzuqlg0fxkgxfxsnsz9xe7` |
-| ETH | `0x6888d4d2Bbc1776432AA32e02f50DdBeFDeE31Af` |
-| SOL | `AXAMj68npvibHCg1hNqX7b51iGTeQqKuMeaQY6asmoXL` |
-| GRAM | `UQAH2_xVEAa2AkTfvZ5f5c_kLwJ7JflcEMgcKb4rWucC41q5` |
-| ADA | `addr1q9lclrf04dvdfnv9n2u0nxf3ps4lwsuc0ptmuha4nk5cnxq0w5zns4f6a2qjrdnaklkgxdgmhy7tqeg99ut4enzkx84s08dqty` |
-| TRX | `TCrfaBYqi4ar7n2FwrtvxT2exvbbYcToNq` |
+The panel, the sidebar entry and the plugin page metadata ship in **Russian**,
+**English** and **Chinese**. The active language follows the GUI locale, so the
+sidebar label and all panel strings switch without a reload.
