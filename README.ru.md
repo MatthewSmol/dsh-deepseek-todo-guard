@@ -90,3 +90,21 @@ npm test           # typecheck + 67 тестов
 Панель, пункт сайдбара и метаданные страницы плагина есть на **русском**,
 **английском** и **китайском**. Активный язык следует за локалью GUI, поэтому
 подпись в сайдбаре и строки панели переключаются без перезагрузки.
+
+## Поддержать проект
+
+Плагин бесплатный и остаётся бесплатным. Если он экономит вам время и есть
+желание отблагодарить — подойдёт любой из адресов, сеть указана рядом.
+
+```text
+BTC   bc1qmvw20wke93dtnf0hzzuqlg0fxkgxfxsnsz9xe7
+ETH   0x6888d4d2Bbc1776432AA32e02f50DdBeFDeE31Af
+SOL   AXAMj68npvibHCg1hNqX7b51iGTeQqKuMeaQY6asmoXL
+GRAM  UQAH2_xVEAa2AkTfvZ5f5c_kLwJ7JflcEMgcKb4rWucC41q5
+ADA   addr1q9lclrf04dvdfnv9n2u0nxf3ps4lwsuc0ptmuha4nk5cnxq0w5zns4f6a2qjrdnaklkgxdgmhy7tqeg99ut4enzkx84s08dqty
+TRX   TCrfaBYqi4ar7n2FwrtvxT2exvbbYcToNq
+```
+
+Сети: BTC — Bitcoin; ETH — Ethereum (ERC-20); SOL — Solana; GRAM — TON;
+ADA — Cardano; TRX — Tron (TRC-20). Сверьте адрес с монетой перед отправкой:
+перевод в чужой сети вернуть нельзя.

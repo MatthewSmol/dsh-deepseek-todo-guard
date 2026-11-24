@@ -83,6 +83,21 @@ test('иконка — валидный маленький SVG', async () => {
   assert.ok((await stat(join(root, 'icon.svg'))).size < 256 * 1024)
 })
 
+test('README: раздел поддержки с адресами одинаков в обоих языках', async () => {
+  const addresses = [
+    'bc1qmvw20wke93dtnf0hzzuqlg0fxkgxfxsnsz9xe7',
+    '0x6888d4d2Bbc1776432AA32e02f50DdBeFDeE31Af',
+    'AXAMj68npvibHCg1hNqX7b51iGTeQqKuMeaQY6asmoXL',
+    'UQAH2_xVEAa2AkTfvZ5f5c_kLwJ7JflcEMgcKb4rWucC41q5',
+    'addr1q9lclrf04dvdfnv9n2u0nxf3ps4lwsuc0ptmuha4nk5cnxq0w5zns4f6a2qjrdnaklkgxdgmhy7tqeg99ut4enzkx84s08dqty',
+    'TCrfaBYqi4ar7n2FwrtvxT2exvbbYcToNq',
+  ]
+  for (const file of ['README.md', 'README.ru.md']) {
+    const text = await readFile(join(root, file), 'utf8')
+    for (const address of addresses) assert.ok(text.includes(address), `${file}: нет адреса ${address.slice(0, 8)}…`)
+  }
+})
+
 test('документ плагина существует и описывает новое поведение', async () => {
   const detail = await readFile(join(root, 'docs', 'DETAIL.md'), 'utf8')
   assert.ok(detail.length > 500)

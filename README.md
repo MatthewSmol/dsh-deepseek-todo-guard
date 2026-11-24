@@ -91,3 +91,21 @@ Sizes after minification: host ≈ 14.6 KB, client ≈ 6.3 KB.
 The panel, the sidebar entry and the plugin page metadata ship in **Russian**,
 **English** and **Chinese**. The active language follows the GUI locale, so the
 sidebar label and all panel strings switch without a reload.
+
+## Donations
+
+The plugin is free and stays free. If it saves you time and you want to say
+thanks, any of these addresses works — pick the network in the comment.
+
+```text
+BTC   bc1qmvw20wke93dtnf0hzzuqlg0fxkgxfxsnsz9xe7
+ETH   0x6888d4d2Bbc1776432AA32e02f50DdBeFDeE31Af
+SOL   AXAMj68npvibHCg1hNqX7b51iGTeQqKuMeaQY6asmoXL
+GRAM  UQAH2_xVEAa2AkTfvZ5f5c_kLwJ7JflcEMgcKb4rWucC41q5
+ADA   addr1q9lclrf04dvdfnv9n2u0nxf3ps4lwsuc0ptmuha4nk5cnxq0w5zns4f6a2qjrdnaklkgxdgmhy7tqeg99ut4enzkx84s08dqty
+TRX   TCrfaBYqi4ar7n2FwrtvxT2exvbbYcToNq
+```
+
+Networks: BTC — Bitcoin; ETH — Ethereum (ERC-20); SOL — Solana; GRAM — TON;
+ADA — Cardano; TRX — Tron (TRC-20). Double-check the address against the coin
+before sending: transfers on a wrong network cannot be recovered.
