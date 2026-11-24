@@ -20,6 +20,9 @@ Every 30 seconds (configurable) the watcher walks the live sessions and:
 | the turn ended and items are unfinished | marks the finished ones completed |
 | the list exists in this turn and is fresh | leaves it alone |
 
+The list is restored the moment a turn starts (the projection resets there) and
+catches up after every model step, so the plaque never lags behind the work.
+
 The watcher also **nudges the agent itself**: when the plaque had to be created or
 refreshed, a short context message goes into the agent's next step (through
 `agent.inject`, which never wakes an idle driver) with the current list and a

@@ -424,12 +424,36 @@ export function apply(ctx: Context, config: Config = {}): void {
     void Promise.allSettled(running).then(() => beacon('тик'))
   }
 
+  /**
+   * Проверить одну сессию по событию её лога, не дожидаясь тика.
+   *
+   * `turn/start` сразу возвращает плашку: проекция `todos` обнуляется на этом
+   * событии, и без немедленной записи над полем ввода полминуты пусто.
+   * `step/end` — конец шага модели, то есть завершённая единица работы: статусы
+   * догоняют прогресс без ожидания до минуты.
+   * @param session - сессия из события.
+   * @param eventType - тип события.
+   */
+  const react = (session: any, eventType: string): void => {
+    if (eventType !== 'turn/start' && eventType !== 'step/end') return
+    const agent = (listAgents(ctx.agents) as AgentFace[]).find(item => item.id === session?.id)
+    if (agent === undefined) return
+    void service(agent).catch((error: unknown) => {
+      ctx.logger.warn(`todo-watch: реакция на ${eventType} в ${agent.id} не удалась: ${String(error)}`)
+    })
+  }
+
   // Единый таймер на процесс; не удерживает процесс при завершении DSH.
   ctx.effect(() => {
     const timer = setInterval(sweep, settings.intervalMs)
     timer.unref?.()
     return () => clearInterval(timer)
   }, 'todo-watch: таймер проверок')
+
+  // Начало хода и конец шага: список восстанавливается и догоняет работу сразу.
+  ctx.on<unknown>('session/event', (session: any, event: any) => {
+    react(session, String(event?.type))
+  })
 
   // Конец хода: сразу отметить выполненное, не дожидаясь тика.
   ctx.on<unknown>('session/event', (session: any, event: any) => {

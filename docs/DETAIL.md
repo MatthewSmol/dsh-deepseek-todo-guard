@@ -31,8 +31,18 @@ tool names, whether the turn is still open.
 | the agent is idle and the list is older than `staleAfterMinutes` | refresh | `список давно не обновлялся` |
 | list is fresh | do nothing | `список актуален` |
 
-`turn/end` is handled immediately, without waiting for the tick, so checkmarks
-appear without a 30 second delay.
+Event reactions, without waiting for the tick:
+
+- `turn/start` — the `todos` projection is reset on this event, so the list is
+  written immediately: the plaque never stays empty for half a minute at the
+  start of a turn;
+- `step/end` — the end of a model step, i.e. a completed unit of work: statuses
+  catch up with progress without waiting for `refreshSeconds`;
+- `turn/end` — the list is closed (`completed`) right away, so checkmarks appear
+  without a 30 second delay.
+
+No duplicate writes: the last written signature lives in the process-wide state
+and is compared against what the log already holds.
 
 ## Nudging the agent
 

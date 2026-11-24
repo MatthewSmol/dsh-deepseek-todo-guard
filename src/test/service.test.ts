@@ -235,6 +235,42 @@ test('напоминания можно выключить', async () => {
   assert.equal(injected.length, 0)
 })
 
+test('turn/start сразу возвращает список, не дожидаясь тика', async () => {
+  resetRuntimeStateForTests()
+  const listeners: Array<(session: any, event: any) => void> = []
+  const { appended, agent } = fakeAgent([])
+  // Ход открыт, список пуст: событие должно само запустить проверку.
+  const events: any[] = []
+  ;(agent.session as any).snapshotEvents = () => events
+  const ctx: any = fakeContext({ list: () => [agent] })
+  ctx.on = (name: string, listener: any) => {
+    if (name === 'session/event') listeners.push(listener)
+    return () => {}
+  }
+  const realSetInterval = globalThis.setInterval
+  globalThis.setInterval = (() => 0) as any
+  try {
+    apply(ctx, { checkIntervalSeconds: 30 })
+  } finally {
+    globalThis.setInterval = realSetInterval
+  }
+
+  events.push(
+    { type: 'turn/start', seq: 1, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, data: { content: [{ type: 'text', text: 'сделай задачу' }] } },
+    { type: 'step/start', seq: 3, data: {} },
+  )
+  for (const listener of listeners) listener(agent.session, { type: 'turn/start', seq: 1, data: { turn: 1 } })
+  await new Promise(resolve => setTimeout(resolve, 40))
+  assert.equal(appended.length, 1, 'на turn/start список должен записаться сразу')
+
+  // Повторный список пришёл от агента — событие step/end не должно писать лишнего.
+  events.push({ type: 'todo/write', seq: 4, time: Date.now(), data: { todos: appended[0]!.data.todos } })
+  for (const listener of listeners) listener(agent.session, { type: 'step/end', seq: 4, data: {} })
+  await new Promise(resolve => setTimeout(resolve, 40))
+  assert.equal(appended.length, 1, 'без изменений повторной записи быть не должно')
+})
+
 test('модель недоступна — список всё равно появляется', async () => {
   const { appended, agent } = fakeAgent(eventsWithTurn)
   await tick(fakeContext({ list: () => [agent] }, { llm: undefined }))
