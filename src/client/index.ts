@@ -9,6 +9,38 @@
 
 import { createElement, useEffect, useState } from 'react'
 
+/** Параметры одной регистрации в слоте. */
+interface SlotRegistration {
+  /** Имя слота. */
+  name: string
+  /** Ключ или id ячейки. */
+  id?: string
+  /** Ключ для ключевого слота. */
+  key?: string
+  /** Порядок в списке. */
+  order?: number
+  /** Пространство локали для `t` в компоненте. */
+  locale?: string
+  /** Подпись пункта: thunk перечитывается при каждой отрисовке. */
+  label?: () => string
+}
+
+/** Клиентский контекст плагина (своё описание: host-типы сюда не подмешиваются). */
+interface ClientContext {
+  /** Слоты интерфейса. */
+  slots: {
+    inject(name: string, create: () => () => void): () => void
+    register(registration: SlotRegistration, component: (props: any) => any): () => void
+  }
+  /** Локали интерфейса. */
+  locale: {
+    register(namespace: string, dictionaries: Record<string, Record<string, string>>): () => void
+    bind(namespace: string): (key: string) => string
+  }
+  /** Ресурс, живущий вместе с плагином. */
+  effect(create: () => () => void, label?: string): void
+}
+
 /** Имя пространства локали. */
 const NS = 'todo-watch'
 
@@ -274,7 +306,7 @@ export function JournalIcon(props: { size?: number; active?: boolean }): any {
  * Зарегистрировать пункт в сайдбаре и панель журнала.
  * @param ctx - клиентский контекст плагина.
  */
-export function apply(ctx: any): void {
+export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, DICTIONARIES as unknown as Record<string, Record<string, string>>), 'todo-watch: словари')
   // Переводы для подписи пункта: thunk читается при каждой отрисовке, поэтому
   // текст следует за активным языком без повторной регистрации.

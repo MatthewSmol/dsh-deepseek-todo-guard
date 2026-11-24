@@ -5,6 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply, listAgents } from '../index.js'
+import { resetRuntimeStateForTests } from '../state.js'
 
 /** Агент с минимальным лицом и записывающим логом. */
 function fakeAgent(seed: readonly any[], id = 'session-1') {
@@ -36,6 +37,8 @@ async function tick(ctx: any, config: any = {}): Promise<void> {
   const timers: Array<() => void> = []
   const realSetInterval = globalThis.setInterval
   globalThis.setInterval = ((fn: () => void) => { timers.push(fn); return 0 }) as any
+  // Состояние плагина общее на процесс: в тестах каждый сценарий начинает с чистого.
+  resetRuntimeStateForTests()
   try {
     apply(ctx, { checkIntervalSeconds: 5, ...config })
     timers[0]?.()
@@ -121,6 +124,57 @@ test('агент уже писал список в этом ходе — тик 
   ])
   await tick(fakeContext({ list: () => [agent] }))
   assert.equal(appended.length, 0)
+})
+
+test('повторная активация в том же процессе делит журнал и маршрут', async () => {
+  resetRuntimeStateForTests()
+  const { readFile } = await import('node:fs/promises')
+  const { appendFile, rm } = await import('node:fs/promises')
+  const journalPath = new URL('../../.nudges.json', import.meta.url)
+  await rm(journalPath, { force: true })
+
+  const routes: any[] = []
+  const makeCtx = (agent: any) => {
+    const timers: Array<() => void> = []
+    const realSetInterval = globalThis.setInterval
+    globalThis.setInterval = ((fn: () => void) => { timers.push(fn); return 0 }) as any
+    const ctx = {
+      agents: { list: () => [agent] },
+      logger: { warn() {}, error() {}, info() {} },
+      on: () => () => {},
+      effect: (create: () => () => void) => create(),
+      inject: (names: string[], cb: (c: any) => void): (() => void) => {
+        if (names.includes('webServer')) {
+          cb({
+            webServer: { register: (route: any) => { routes.push(route); return () => {} } },
+            on: () => () => {},
+            effect: (create: () => () => void) => create(),
+          })
+          return () => {}
+        }
+        return () => {}
+      },
+      get: () => undefined,
+    }
+    apply(ctx, { checkIntervalSeconds: 5 })
+    globalThis.setInterval = realSetInterval
+    return timers
+  }
+
+  const first = fakeAgent(eventsWithTurn)
+  const early = makeCtx(first.agent)[0]!
+  await early()
+  await new Promise(resolve => setTimeout(resolve, 20))
+
+  // Вторая активация: свой таймер, но журнал и маршрут — те же.
+  const second = fakeAgent(eventsWithTurn, 'session-2')
+  makeCtx(second.agent)
+  assert.equal(routes.length, 1, 'маршрут регистрируется один раз на процесс')
+
+  const stored = JSON.parse(await readFile(journalPath, 'utf8'))
+  assert.equal(stored.entries.length, 1)
+  await appendFile(journalPath, '') // файл существует и доступен
+  await rm(journalPath, { force: true })
 })
 
 test('журнал: тик создаёт запись с действием и источником', async () => {

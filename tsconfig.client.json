@@ -14,5 +14,5 @@
     "noUnusedLocals": false,
     "types": []
   },
-  "include": ["src/client/**/*.ts", "src/ambient/client.d.ts"]
+  "include": ["src/client/**/*.ts", "src/ambient/react.d.ts"]
 }

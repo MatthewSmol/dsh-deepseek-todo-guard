@@ -17,14 +17,14 @@
  * лог.
  */
 
-import { randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { frameInput, normalizeTodos, parsePayload, systemPrompt } from './watch/curator.js'
 import { heuristicTodos } from './watch/heuristic.js'
 import { planAction, sameTodos } from './watch/plan.js'
-import { createJournal, parseJournal, serializeJournal, type Journal, type NudgeRecord } from './journal.js'
+import type { NudgeRecord } from './journal.js'
+import { runtimeState } from './state.js'
 import { journalResponse, NUDGES_PATH, PAGE_GLOBAL } from './route.js'
 import { readView } from './watch/read.js'
 import type { SessionView, TodoItem } from './watch/types.js'
@@ -184,26 +184,11 @@ interface Track {
 export function apply(ctx: Context, config: Config = {}): void {
   const settings = resolveSettings(config)
   const tracks = new Map<string, Track>()
-
-  // Одноразовый токен страницы: защищает эндпоинт журнала от чужих запросов
-  // на тот же loopback-порт. Меняется при каждом старте процесса.
-  const pageToken = randomUUID()
-
-  const journalPath = new URL('../.nudges.json', import.meta.url)
-  const journal: Journal = createJournal({
-    initial: (() => {
-      try {
-        return parseJournal(readFileSync(journalPath, 'utf8'))
-      } catch {
-        return []
-      }
-    })(),
-    onChange: (entries) => {
-      try {
-        writeFileSync(journalPath, serializeJournal(entries), 'utf8')
-      } catch { /* журнал не должен мешать подсказкам */ }
-    },
-  })
+  // Журнал, токен и отметки живут в модуле: повторная активация строки в том же
+  // процессе не должна создавать вторую копию с пустым журналом.
+  const shared = runtimeState()
+  const journal = shared.journal
+  const keyOf = (todos: readonly TodoItem[]): string => JSON.stringify(todos.map(item => [item.content, item.status]))
 
   /**
    * Маячок: короткая запись в файл рядом с пакетом. Нужен, чтобы отличать
@@ -253,6 +238,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   ): void => {
     if (todos.length === 0) return
     if (sameTodos(view.todos, todos)) return
+    const signature = keyOf(todos)
+    if (shared.lastWritten.get(agent.id) === signature) return
     agent.session.append('todo/write', {
       todos: todos.map(item => ({ content: item.content, status: item.status })),
     })
@@ -265,6 +252,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       items: todos.length,
       reason,
     })
+    shared.lastWritten.set(agent.id, signature)
     ctx.logger.info(`todo-watch: ${agent.id} — ${reason}, задач ${todos.length}`)
   }
 
@@ -411,18 +399,21 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // Маршрут журнала и глобал страницы; сервис webServer есть только в web-профиле.
   ctx.inject(['webServer'], (webCtx: Context) => {
-    webCtx.effect(() => (webCtx as any).webServer.register({
-      kind: 'exact',
-      path: NUDGES_PATH,
-      resource: (request: Request) => Promise.resolve(
-        journalResponse(request, journal, settings.historySize, pageToken),
-      ),
-    }), 'todo-watch: маршрут журнала')
+    if (!shared.routeRegistered) {
+      shared.routeRegistered = true
+      webCtx.effect(() => (webCtx as any).webServer.register({
+        kind: 'exact',
+        path: NUDGES_PATH,
+        resource: (request: Request) => Promise.resolve(
+          journalResponse(request, journal, settings.historySize, shared.pageToken),
+        ),
+      }), 'todo-watch: маршрут журнала')
+    }
     webCtx.on<unknown>('webserver/index-inject', (table: any[]) => {
       table.push({
         kind: 'global',
         name: PAGE_GLOBAL,
-        value: { endpoint: NUDGES_PATH, token: pageToken, historySize: settings.historySize },
+        value: { endpoint: NUDGES_PATH, token: shared.pageToken, historySize: settings.historySize },
       })
     })
   })

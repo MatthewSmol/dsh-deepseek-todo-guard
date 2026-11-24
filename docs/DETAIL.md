@@ -113,6 +113,15 @@ UI state: it does not wake the agent and does not enter the model context.
     historySize: 5
 ```
 
+## One state per process
+
+The journal, the page token and the route flag live in the module, not inside
+`apply`. Cordis can reload a plugin row without restarting the server, and a new
+`apply` would otherwise create a second, empty journal behind the same route: the
+panel would show 0 entries while the watcher keeps writing files. State is shared
+by every activation, the route is registered once, and the last written signature
+per session suppresses duplicate `todo/write` events from two timers.
+
 ## Verifying that the new version is loaded
 
 On every tick the watcher writes `.watch-alive.json` next to the package:

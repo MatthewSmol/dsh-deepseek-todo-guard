@@ -9,8 +9,8 @@
 declare module '@deepseek-ai/cordis' {
   /** Контекст плагина: подписки, эффекты, журнал и сервисы. */
   interface Context {
-    /** Реестр живых агентов процесса. */
-    agents: Iterable<unknown>
+    /** Реестр живых агентов процесса (`AgentRegistry`: `list()`, без итератора). */
+    agents: { list(): any[] }
     /** Журнал плагина. */
     logger: {
       warn(message: string): void
