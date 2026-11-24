@@ -25,6 +25,7 @@ import { heuristicTodos } from './watch/heuristic.js'
 import { planAction, sameTodos } from './watch/plan.js'
 import type { NudgeRecord } from './journal.js'
 import { runtimeState } from './state.js'
+import { nudgeMessage, shouldNudge } from './nudge.js'
 import { journalResponse, NUDGES_PATH, PAGE_GLOBAL } from './route.js'
 import { readView } from './watch/read.js'
 import type { SessionView, TodoItem } from './watch/types.js'
@@ -44,6 +45,10 @@ export interface Config {
   checkIntervalSeconds?: number
   /** Обновлять список идущего хода не реже, чем раз в столько секунд (15–600). */
   refreshSeconds?: number
+  /** Напоминать агенту, что список надо вести самому. */
+  nudgeAgents?: boolean
+  /** Не чаще одного напоминания агенту за столько секунд (60–3600). */
+  nudgeAfterSeconds?: number
   /** Считать список устаревшим через столько минут простоя (0 — не считать). */
   staleAfterMinutes?: number
   /** Источник формулировок: модель сессии или эвристика. */
@@ -74,6 +79,8 @@ export interface Config {
 export const Config = Schema.object<Config>({
   checkIntervalSeconds: Schema.number().min(5).max(600).default(30),
   refreshSeconds: Schema.number().min(15).max(600).default(60),
+  nudgeAgents: Schema.boolean().default(true),
+  nudgeAfterSeconds: Schema.number().min(60).max(3600).default(180),
   staleAfterMinutes: Schema.number().min(0).max(600).default(10),
   curator: Schema.string().default('llm'),
   llmProvider: Schema.string(),
@@ -92,6 +99,8 @@ export const Config = Schema.object<Config>({
 export interface Settings {
   readonly intervalMs: number
   readonly refreshSeconds: number
+  readonly nudgeAgents: boolean
+  readonly nudgeAfterMs: number
   readonly staleAfterMinutes: number
   readonly curator: CuratorMode
   readonly llmProvider?: string
@@ -128,6 +137,8 @@ export function resolveSettings(config: Config = {}): Settings {
   return {
     intervalMs: int(config.checkIntervalSeconds, 5, 600, 30) * 1000,
     refreshSeconds: int(config.refreshSeconds, 15, 600, 60),
+    nudgeAgents: bool(config.nudgeAgents, true),
+    nudgeAfterMs: int(config.nudgeAfterSeconds, 60, 3600, 180) * 1000,
     staleAfterMinutes: int(config.staleAfterMinutes, 0, 600, 10),
     curator: config.curator === 'heuristic' ? 'heuristic' : 'llm',
     ...provider !== undefined && model !== undefined ? { llmProvider: provider, llmModel: model } : {},
@@ -259,6 +270,37 @@ export function apply(ctx: Context, config: Config = {}): void {
       reason,
     })
     shared.lastWritten.set(agent.id, signature)
+
+    // Напоминание агенту: список ведёт сторож, но поддерживать его должен сам
+    // агент. `inject` кладёт контекст в следующий шаг и не будит драйвер.
+    const now = Date.now()
+    if (action !== 'promote' && shouldNudge({
+      enabled: settings.nudgeAgents,
+      turnOpen: view.turnOpen,
+      lastNudgedAt: shared.lastNudged.get(agent.id) ?? 0,
+      now,
+      minIntervalMs: settings.nudgeAfterMs,
+    })) {
+      try {
+        const target = agent as unknown as { inject?: (message: Record<string, unknown>) => void }
+        if (typeof target.inject === 'function') {
+          target.inject(nudgeMessage(todos, reason))
+          shared.lastNudged.set(agent.id, now)
+          journal.push({
+            at: now,
+            sessionId: agent.id,
+            ...view.title === undefined ? {} : { sessionTitle: view.title },
+            action: 'nudge',
+            source: 'none',
+            items: todos.length,
+            reason: 'напомнил агенту вести список дальше',
+          })
+          ctx.logger.info(`todo-watch: ${agent.id} — напомнил агенту про список`)
+        }
+      } catch (error) {
+        ctx.logger.warn(`todo-watch: не удалось напомнить ${agent.id}: ${String(error)}`)
+      }
+    }
     // Сверка с проекцией `todos`: если штатная плашка не увидела запись, это
     // видно в маячке, иначе причину «плашки нет» не отличить от «нечего писать».
     try {

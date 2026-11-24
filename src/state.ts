@@ -26,6 +26,8 @@ export interface RuntimeState {
   routeRegistered: boolean
   /** Подписи последних записей по сессиям: защита от дублей при двух таймерах. */
   readonly lastWritten: Map<string, string>
+  /** Когда агенту последний раз напоминали про список, мс эпохи. */
+  readonly lastNudged: Map<string, number>
   /** Итог последней сверки записи с проекцией `todos` — попадает в маячок. */
   projection: 'ok' | 'missing' | 'pending'
 }
@@ -63,6 +65,7 @@ export function runtimeState(): RuntimeState {
     journalPath,
     routeRegistered: false,
     lastWritten: new Map(),
+    lastNudged: new Map(),
     projection: 'pending',
   }
   return state

@@ -11,6 +11,8 @@
       config:
         checkIntervalSeconds: 30
         refreshSeconds: 60
+        nudgeAgents: true
+        nudgeAfterSeconds: 180
         staleAfterMinutes: 10
         curator: llm
         llmMinIntervalSeconds: 60

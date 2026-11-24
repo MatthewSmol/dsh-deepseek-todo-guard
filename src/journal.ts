@@ -8,7 +8,7 @@
  */
 
 /** Действие, которым сторож вмешался. */
-export type NudgeAction = 'create' | 'refresh' | 'promote'
+export type NudgeAction = 'create' | 'refresh' | 'promote' | 'nudge'
 
 /** Откуда взялись формулировки задач. */
 export type NudgeSource = 'model' | 'heuristic' | 'none'
@@ -48,7 +48,7 @@ function isRecord(value: unknown): value is NudgeRecord {
   const item = value as Record<string, unknown>
   return typeof item.at === 'number' && Number.isFinite(item.at)
     && typeof item.sessionId === 'string' && item.sessionId !== ''
-    && (item.action === 'create' || item.action === 'refresh' || item.action === 'promote')
+    && (item.action === 'create' || item.action === 'refresh' || item.action === 'promote' || item.action === 'nudge')
     && (item.source === 'model' || item.source === 'heuristic' || item.source === 'none')
     && typeof item.items === 'number'
     && typeof item.reason === 'string'

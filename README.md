@@ -20,6 +20,13 @@ Every 30 seconds (configurable) the watcher walks the live sessions and:
 | the turn ended and items are unfinished | marks the finished ones completed |
 | the list exists in this turn and is fresh | leaves it alone |
 
+The watcher also **nudges the agent itself**: when the plaque had to be created or
+refreshed, a short context message goes into the agent's next step (through
+`agent.inject`, which never wakes an idle driver) with the current list and a
+request to keep it updated through `todo_write`. Reminders are rate-limited
+(`nudgeAfterSeconds`, 180 s by default) and appear in the journal as
+«nudged agent».
+
 Every nudge goes to a journal: time, session (title or short id), action, source
 of the wording, and item count. The «TODO watcher» panel in the left sidebar
 shows the latest 5 entries and refreshes every 5 seconds. The journal lives in
@@ -59,6 +66,8 @@ applied at server start only.
   config:
     checkIntervalSeconds: 30    # 5–600
     refreshSeconds: 60          # refresh a running turn this often (15–600)
+    nudgeAgents: true           # remind the agent to keep the list current
+    nudgeAfterSeconds: 180      # at most one reminder per agent per interval
     staleAfterMinutes: 10       # 0 — never treat an idle list as stale
     curator: llm                # llm | heuristic
     llmProvider: ''             # defaults to the session route

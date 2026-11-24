@@ -34,6 +34,22 @@ tool names, whether the turn is still open.
 `turn/end` is handled immediately, without waiting for the tick, so checkmarks
 appear without a 30 second delay.
 
+## Nudging the agent
+
+A plaque the watcher maintains behind the agent's back is not enough: the agent
+should keep the list current itself. After a `create` or `refresh` write the
+watcher sends one short context message into the agent's next step with
+`agent.inject`:
+
+- it never wakes an idle driver and never starts a turn;
+- it carries the current list, per-status counts and the reason for the reminder;
+- it asks the agent to call `todo_write` with the complete list when the plan
+  changes;
+- it is rate-limited by `nudgeAfterSeconds` (180 s by default) and can be turned
+  off with `nudgeAgents: false`;
+- each reminder is a separate `nudge` entry in the journal, so the sidebar shows
+  exactly when and whom the watcher poked.
+
 ## Journal in the sidebar
 
 Every nudge is recorded: time, session id and its title (from `session/title`),
@@ -101,6 +117,8 @@ UI state: it does not wake the agent and does not enter the model context.
   config:
     checkIntervalSeconds: 30
     refreshSeconds: 60
+    nudgeAgents: true
+    nudgeAfterSeconds: 180
     staleAfterMinutes: 10
     curator: llm
     llmProvider: ''            # defaults to the session route

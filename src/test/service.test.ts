@@ -210,6 +210,31 @@ test('маячок сообщает итог сверки с проекцией 
   assert.equal(beacon.agents, 1)
 })
 
+test('тик напоминает агенту и отмечает это в журнале', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { agent } = fakeAgent(eventsWithTurn)
+  const injected: any[] = []
+  ;(agent as any).inject = (message: any) => { injected.push(message) }
+  await tick(fakeContext({ list: () => [agent] }))
+
+  assert.equal(injected.length, 1)
+  const text = injected[0].content[0].text as string
+  assert.match(text, /TODO watch/)
+  assert.deepEqual(injected[0].source, { kind: 'todo-watch' })
+
+  const journal = JSON.parse(await readFile(new URL('../../.nudges.json', import.meta.url), 'utf8'))
+  const actions = journal.entries.map((entry: any) => entry.action)
+  assert.deepEqual(actions, ['nudge', 'create'])
+})
+
+test('напоминания можно выключить', async () => {
+  const { agent } = fakeAgent(eventsWithTurn)
+  const injected: any[] = []
+  ;(agent as any).inject = (message: any) => { injected.push(message) }
+  await tick(fakeContext({ list: () => [agent] }), { nudgeAgents: false })
+  assert.equal(injected.length, 0)
+})
+
 test('модель недоступна — список всё равно появляется', async () => {
   const { appended, agent } = fakeAgent(eventsWithTurn)
   await tick(fakeContext({ list: () => [agent] }, { llm: undefined }))
