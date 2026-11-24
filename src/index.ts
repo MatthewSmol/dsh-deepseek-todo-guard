@@ -17,6 +17,7 @@
  * лог.
  */
 
+import { writeFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { frameInput, normalizeTodos, parsePayload, systemPrompt } from './watch/curator.js'
@@ -154,6 +155,25 @@ export function apply(ctx: Context, config: Config = {}): void {
   const settings = resolveSettings(config)
   const tracks = new Map<string, Track>()
 
+  /**
+   * Маячок: короткая запись в файл рядом с пакетом. Нужен, чтобы отличать
+   * «перезапуск не сделан, код старый» от «код новый, но сторож молчит».
+   * @param note - что записать в последнюю строку.
+   */
+  const beacon = (note: string): void => {
+    try {
+      const state = {
+        at: new Date().toISOString(),
+        version: 2,
+        note,
+        intervalMs: settings.intervalMs,
+        curator: settings.curator,
+        agents: [...(ctx.agents as Iterable<unknown>)].length,
+      }
+      writeFileSync(new URL('../.watch-alive.json', import.meta.url), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+    } catch { /* маячок не должен мешать работе */ }
+  }
+
   const trackOf = (id: string): Track => {
     let track = tracks.get(id)
     if (track === undefined) {
@@ -277,6 +297,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ctx.logger.warn(`todo-watch: проверка ${agent.id} не удалась: ${String(error)}`)
       })
     }
+    beacon('тик')
   }
 
   // Единый таймер на процесс; не удерживает процесс при завершении DSH.
@@ -312,6 +333,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     tracks.delete(id)
   })
 
+  beacon('старт')
   ctx.logger.info(
     `todo-watch: проверка раз в ${settings.intervalMs / 1000} с, куратор ${settings.curator}, до ${settings.maxItems} задач`,
   )
