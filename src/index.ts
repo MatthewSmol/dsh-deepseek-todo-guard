@@ -17,12 +17,15 @@
  * лог.
  */
 
-import { writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { frameInput, normalizeTodos, parsePayload, systemPrompt } from './watch/curator.js'
 import { heuristicTodos } from './watch/heuristic.js'
 import { planAction, sameTodos } from './watch/plan.js'
+import { createJournal, parseJournal, serializeJournal, type Journal, type NudgeRecord } from './journal.js'
+import { journalResponse, NUDGES_PATH, PAGE_GLOBAL } from './route.js'
 import { readView } from './watch/read.js'
 import type { SessionView, TodoItem } from './watch/types.js'
 
@@ -61,6 +64,8 @@ export interface Config {
   promoteCompletedOnTurnEnd?: boolean
   /** Обслуживать и сессии субагентов. */
   includeSubagents?: boolean
+  /** Сколько последних подсказок показывать в панели (1–50). */
+  historySize?: number
 }
 
 /** Схема конфигурации для строки патча. */
@@ -77,6 +82,7 @@ export const Config = Schema.object<Config>({
   allowParallelInProgress: Schema.boolean().default(true),
   promoteCompletedOnTurnEnd: Schema.boolean().default(true),
   includeSubagents: Schema.boolean().default(false),
+  historySize: Schema.number().min(1).max(50).default(5),
 })
 
 /** Развёрнутые настройки с проверенными значениями. */
@@ -93,6 +99,7 @@ export interface Settings {
   readonly allowParallel: boolean
   readonly promoteOnTurnEnd: boolean
   readonly includeSubagents: boolean
+  readonly historySize: number
 }
 
 /** Целое в диапазоне. */
@@ -126,6 +133,7 @@ export function resolveSettings(config: Config = {}): Settings {
     allowParallel: bool(config.allowParallelInProgress, true),
     promoteOnTurnEnd: bool(config.promoteCompletedOnTurnEnd, true),
     includeSubagents: bool(config.includeSubagents, false),
+    historySize: int(config.historySize, 1, 50, 5),
   }
 }
 
@@ -177,6 +185,26 @@ export function apply(ctx: Context, config: Config = {}): void {
   const settings = resolveSettings(config)
   const tracks = new Map<string, Track>()
 
+  // Одноразовый токен страницы: защищает эндпоинт журнала от чужих запросов
+  // на тот же loopback-порт. Меняется при каждом старте процесса.
+  const pageToken = randomUUID()
+
+  const journalPath = new URL('../.nudges.json', import.meta.url)
+  const journal: Journal = createJournal({
+    initial: (() => {
+      try {
+        return parseJournal(readFileSync(journalPath, 'utf8'))
+      } catch {
+        return []
+      }
+    })(),
+    onChange: (entries) => {
+      try {
+        writeFileSync(journalPath, serializeJournal(entries), 'utf8')
+      } catch { /* журнал не должен мешать подсказкам */ }
+    },
+  })
+
   /**
    * Маячок: короткая запись в файл рядом с пакетом. Нужен, чтобы отличать
    * «перезапуск не сделан, код старый» от «код новый, но сторож молчит».
@@ -191,6 +219,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         intervalMs: settings.intervalMs,
         curator: settings.curator,
         agents: listAgents(ctx.agents).length,
+        nudges: journal.size(),
       }
       writeFileSync(new URL('../.watch-alive.json', import.meta.url), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
     } catch { /* маячок не должен мешать работе */ }
@@ -205,12 +234,36 @@ export function apply(ctx: Context, config: Config = {}): void {
     return track
   }
 
-  /** Записать список, если он отличается от текущего. */
-  const writeTodos = (agent: AgentFace, view: SessionView, todos: readonly TodoItem[], reason: string): void => {
+  /**
+   * Записать список, если он отличается от текущего, и отметить подсказку в журнале.
+   * @param agent - агент сессии.
+   * @param view - состояние сессии из лога.
+   * @param todos - новый список.
+   * @param action - что именно делает сторож.
+   * @param source - кто дал формулировки.
+   * @param reason - короткая причина для панели.
+   */
+  const writeTodos = (
+    agent: AgentFace,
+    view: SessionView,
+    todos: readonly TodoItem[],
+    action: NudgeRecord['action'],
+    source: NudgeRecord['source'],
+    reason: string,
+  ): void => {
     if (todos.length === 0) return
     if (sameTodos(view.todos, todos)) return
     agent.session.append('todo/write', {
       todos: todos.map(item => ({ content: item.content, status: item.status })),
+    })
+    journal.push({
+      at: Date.now(),
+      sessionId: agent.id,
+      ...view.title === undefined ? {} : { sessionTitle: view.title },
+      action,
+      source,
+      items: todos.length,
+      reason,
     })
     ctx.logger.info(`todo-watch: ${agent.id} — ${reason}, задач ${todos.length}`)
   }
@@ -275,7 +328,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       writeTodos(agent, view, (view.todos ?? []).map(item => ({
         content: item.content,
         status: 'completed' as const,
-      })), decision.reason)
+      })), 'promote', 'none', decision.reason)
       return
     }
 
@@ -293,7 +346,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       try {
         const curated = await curateWithModel(agent, view, controller.signal)
         if (curated !== null) {
-          writeTodos(agent, view, curated, decision.reason)
+          writeTodos(agent, view, curated, decision.action, 'model', decision.reason)
           return
         }
       } catch (error) {
@@ -309,7 +362,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     writeTodos(agent, view, heuristicTodos(view, {
       maxItems: settings.maxItems,
       allowParallel: settings.allowParallel,
-    }), decision.reason)
+    }), decision.action, 'heuristic', decision.reason)
   }
 
   /** Один проход по всем живым агентам. */
@@ -342,7 +395,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       writeTodos(agent, view, view.todos.map(item => ({
         content: item.content,
         status: 'completed' as const,
-      })), 'ход завершён')
+      })), 'promote', 'none', 'ход завершён')
     } catch (error) {
       ctx.logger.warn(`todo-watch: не удалось закрыть список ${agent.id}: ${String(error)}`)
     }
@@ -354,6 +407,24 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (typeof id !== 'string') return
     tracks.get(id)?.abort?.abort()
     tracks.delete(id)
+  })
+
+  // Маршрут журнала и глобал страницы; сервис webServer есть только в web-профиле.
+  ctx.inject(['webServer'], (webCtx: Context) => {
+    webCtx.effect(() => (webCtx as any).webServer.register({
+      kind: 'exact',
+      path: NUDGES_PATH,
+      resource: (request: Request) => Promise.resolve(
+        journalResponse(request, journal, settings.historySize, pageToken),
+      ),
+    }), 'todo-watch: маршрут журнала')
+    webCtx.on<unknown>('webserver/index-inject', (table: any[]) => {
+      table.push({
+        kind: 'global',
+        name: PAGE_GLOBAL,
+        value: { endpoint: NUDGES_PATH, token: pageToken, historySize: settings.historySize },
+      })
+    })
   })
 
   beacon('старт')

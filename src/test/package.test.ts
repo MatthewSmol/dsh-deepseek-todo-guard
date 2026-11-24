@@ -16,9 +16,11 @@ test('package.json: host-only пакет с патчем', async () => {
   assert.equal(pkg.type, 'module')
   assert.equal(pkg.exports['.'], './dist/index.js')
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
-  // Клиентской половины нет: плашка задач — штатная панель DSH.
-  assert.equal(pkg.dsh.client, undefined)
-  assert.equal(pkg.exports['./client'], undefined)
+  // Клиентская половина: пункт сайдбара и панель журнала.
+  assert.equal(pkg.dsh.client.platform, 'web')
+  assert.equal(pkg.dsh.client.immediately, true)
+  assert.deepEqual(pkg.dsh.client.inject, ['@deepseek-ai/dsh-client-locale'])
+  assert.equal(pkg.exports['./client'], './dist/client.js')
   assert.deepEqual(Object.keys(pkg.dependencies), ['@deepseek-ai/schemastery'])
 })
 

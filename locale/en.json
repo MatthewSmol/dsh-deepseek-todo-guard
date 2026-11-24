@@ -1,8 +1,8 @@
 {
   "meta": {
     "title": "TODO watcher",
-    "description": "Every 30 seconds it checks the task plaque above the composer in live sessions and writes todo/write itself: creates the list, keeps it current while work goes on, and marks finished items. Wording comes from the session model, with a heuristic fallback.",
+    "description": "Every 30 seconds it checks the task plaque above the composer in live sessions and writes todo/write itself: creates the list, keeps it current, marks finished items. The left sidebar shows the latest nudges: whom it poked and when.",
     "detail": "docs/DETAIL.md"
   },
-  "nav": "TODO watcher"
+  "nav": "TODO watcher log"
 }

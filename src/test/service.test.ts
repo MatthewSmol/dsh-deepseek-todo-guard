@@ -52,6 +52,8 @@ function fakeContext(agents: any, extra: Record<string, unknown> = {}) {
     logger: { warn() {}, error() {}, info() {} },
     on: () => () => {},
     effect: (create: () => () => void) => create(),
+    // webServer в тесте нет: маршрут журнала не регистрируется.
+    inject: () => () => {},
     get: (name: string) => (name === 'llm' ? undefined : (extra as any)[name]),
   }
 }
@@ -119,6 +121,21 @@ test('агент уже писал список в этом ходе — тик 
   ])
   await tick(fakeContext({ list: () => [agent] }))
   assert.equal(appended.length, 0)
+})
+
+test('журнал: тик создаёт запись с действием и источником', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { appended, agent } = fakeAgent(eventsWithTurn)
+  await tick(fakeContext({ list: () => [agent] }))
+  assert.equal(appended.length, 1)
+  const journal = JSON.parse(await readFile(new URL('../../.nudges.json', import.meta.url), 'utf8'))
+  assert.equal(journal.version, 1)
+  const entry = journal.entries[0]
+  assert.equal(entry.sessionId, 'session-1')
+  assert.equal(entry.action, 'create')
+  assert.equal(entry.source, 'heuristic')
+  assert.equal(entry.items, 1)
+  assert.equal(typeof entry.reason, 'string')
 })
 
 test('модель недоступна — список всё равно появляется', async () => {

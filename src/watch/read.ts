@@ -53,6 +53,7 @@ export function readSession(events: readonly LogEvent[]): SessionView {
   let userTexts: string[] = []
   let assistantTexts: string[] = []
   let toolNames: string[] = []
+  let title: string | undefined
 
   for (const event of events) {
     switch (event.type) {
@@ -80,6 +81,11 @@ export function readSession(events: readonly LogEvent[]): SessionView {
         todos = items
         wroteThisTurn = true
         writtenAt = typeof event.time === 'number' ? event.time : Date.now()
+        break
+      }
+      case 'session/title': {
+        const value = event.data?.title
+        if (typeof value === 'string' && value.trim() !== '') title = value.trim()
         break
       }
       case 'user/message': {
@@ -112,6 +118,7 @@ export function readSession(events: readonly LogEvent[]): SessionView {
     userTexts: userTexts.slice(-3),
     assistantTexts: assistantTexts.slice(-3),
     toolNames: toolNames.slice(-20),
+    ...title === undefined ? {} : { title },
   }
 }
 

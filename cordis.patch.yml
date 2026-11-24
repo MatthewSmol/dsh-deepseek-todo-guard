@@ -19,3 +19,4 @@
         allowParallelInProgress: true
         promoteCompletedOnTurnEnd: true
         includeSubagents: false
+        historySize: 5

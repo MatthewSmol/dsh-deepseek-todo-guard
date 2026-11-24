@@ -39,6 +39,8 @@ export interface SessionView {
   readonly assistantTexts: readonly string[]
   /** Имена вызванных инструментов в текущем ходе. */
   readonly toolNames: readonly string[]
+  /** Последнее название сессии из `session/title`, если оно уже есть. */
+  readonly title?: string
 }
 
 /** Решение на один тик. */

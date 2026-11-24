@@ -32,6 +32,13 @@ declare module '@deepseek-ai/cordis' {
     effect(create: () => () => void, label?: string): void
     /** Сервис по имени (возвращает undefined, если его нет). */
     get(name: string): any
+    /**
+     * Выполнить код, когда все сервисы доступны.
+     * @param names - имена сервисов.
+     * @param callback - получает контекст с доступными сервисами.
+     * @returns функция снятия ожидания.
+     */
+    inject(names: readonly string[], callback: (context: any) => void): () => void
   }
 }
 

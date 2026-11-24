@@ -7,6 +7,9 @@
   },
   "files": [
     "src/test/plan.test.ts",
+    "src/test/journal.test.ts",
+    "src/test/route.test.ts",
+    "src/test/client-bundle.test.ts",
     "src/test/service.test.ts",
     "src/test/curator.test.ts",
     "src/test/heuristic.test.ts",
