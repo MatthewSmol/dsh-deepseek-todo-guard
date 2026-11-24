@@ -6,10 +6,9 @@
     "noUnusedLocals": false
   },
   "files": [
-    "src/test/watcher.test.ts",
-    "src/test/package.test.ts",
-    "src/test/host.test.ts",
-    "src/test/projection-schema.test.ts",
-    "src/test/client-bundle.test.ts"
+    "src/test/plan.test.ts",
+    "src/test/curator.test.ts",
+    "src/test/heuristic.test.ts",
+    "src/test/package.test.ts"
   ]
 }

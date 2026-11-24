@@ -1,237 +1,318 @@
 /**
- * Точка входа Host-половины пакета «Сторож TODO».
+ * Сторож TODO — Host-половина.
  *
- * Экспорт по умолчанию — плагин `todo-write`: штатный инструмент `todo_write`
- * из @deepseek-ai/dsh-tool-todo с тем же поведением и описанием для модели.
- * Модуль также загружает объявления событий лога (`todo/write` и
- * `todo-watch/check`): DSH принимает запись события только если его тип
- * объявлен в загруженном модуле.
+ * Плашка задач над полем ввода — штатная панель DSH: она читает проекцию
+ * `todos`, которую создаёт событие `todo/write`. Агент то забывает завести
+ * список, то забывает обновить его. Сторож каждые 30 секунд проходит по живым
+ * сессиям и сам дописывает `todo/write`:
  *
- * Параметр `checkIntervalSeconds` ничего не меняет для инструмента: он нужен
- * только чтобы в строке патча было видно, с каким интервалом работает сторож.
+ * - списка в текущем ходе нет — создаёт его;
+ * - список остался от прошлого хода — заменяет актуальным;
+ * - ход закончился — отмечает задачи выполненными;
+ * - список в ходе есть и свеж — не трогает.
+ *
+ * Формулировки даёт модель самой сессии (`ctx.llm` тем же маршрутом, что и
+ * основной запрос) с лимитом частоты; если модель недоступна — работает
+ * эвристика. Запись делается только при реальном изменении, чтобы не раздувать
+ * лог.
  */
+
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import { apply as applyWatcher, type Config as WatcherConfig } from './host/index.js'
-import { z as zod } from 'zod'
-import type { ZodType } from 'zod'
-import type { TodoItem } from './watch/types.js'
-// Импорты без использования — боковые эффекты: объявления событий лога
-// должны попасть в загруженный модуль.
-import './signature/todo-write/index.js'
-import './signature/todo-watch-check/index.js'
+import { frameInput, normalizeTodos, parsePayload, systemPrompt } from './watch/curator.js'
+import { heuristicTodos } from './watch/heuristic.js'
+import { planAction, sameTodos } from './watch/plan.js'
+import { readView } from './watch/read.js'
+import type { SessionView, TodoItem } from './watch/types.js'
 
-/** Имя плагина: строка `todo-write` заменяет штатный инструмент. */
-export const name = 'todo-write'
+/** Имя плагина и строка патча. */
+export const name = 'todo-watch'
 
-/** Обязательные сервисы: инструменты, проекции и реестр агентов сторожа. */
-export const inject = ['tools', 'sessionProjections', 'agents']
+/** Сервисы: реестр агентов; модель берётся мягко, чтобы работала эвристика. */
+export const inject = ['agents']
 
-/**
- * Что включает строка пакета.
- *
- * Пакет ставится двумя строками, и обе называются `@local/dsh-todo-watch`:
- * одна живёт в патче плагина и включает сторожа, вторая — в пресете агента и
- * даёт инструмент `todo_write`. Имя строки обязано быть именем пакета: сканер
- * клиентских модулей DSH рассматривает только строки с именем пакета, а не
- * подпути, поэтому `@local/dsh-todo-watch/host` остался бы без клиентской
- * половины и без пункта в сайдбаре.
- */
-export type WatchMode = 'all' | 'tool' | 'watcher'
+/** Источник формулировок задач. */
+export type CuratorMode = 'llm' | 'heuristic'
 
-/** Конфигурация строки: инструмент, сторож или всё вместе. */
+/** Конфигурация строки патча. */
 export interface Config {
-  /** Можно ли держать несколько задач в статусе in_progress одновременно. */
-  allowParallelInProgress: boolean
-  /** Интервал сторожа, с. */
+  /** Интервал проверки в секундах (5–600). */
   checkIntervalSeconds?: number
-  /** Порог устаревания списка, мин (0 — выключено). */
+  /** Считать список устаревшим через столько минут (0 — не считать). */
   staleAfterMinutes?: number
-  /** Подсказывать про весь выполненный список при оставшейся работе. */
-  remindAllCompleted?: boolean
-  /** Подсказывать, когда новый ход идёт без списка. */
-  remindMissingList?: boolean
-  /** Подсказывать только простаивающему агенту. */
-  remindOnlyWhenIdle?: boolean
-  /** Писать диагностику клиентских модулей в файл. */
-  diagnostics?: boolean
-  /** Что включает строка: по умолчанию всё. */
-  mode?: WatchMode
+  /** Источник формулировок: модель сессии или эвристика. */
+  curator?: CuratorMode
+  /** Явный провайдер модели (вместе с llmModel); по умолчанию — маршрут сессии. */
+  llmProvider?: string
+  /** Явная модель; по умолчанию — маршрут сессии. */
+  llmModel?: string
+  /** Не чаще одного вызова модели на сессию, секунды. */
+  llmMinIntervalSeconds?: number
+  /** Предел ожидания ответа модели, мс. */
+  llmTimeoutMs?: number
+  /** Лимит выходных токенов модели. */
+  llmMaxOutputTokens?: number
+  /** Сколько задач держать в списке (1–12). */
+  maxItems?: number
+  /** Разрешить несколько задач в работе одновременно. */
+  allowParallelInProgress?: boolean
+  /** Отмечать выполненное при завершении хода. */
+  promoteCompletedOnTurnEnd?: boolean
+  /** Обслуживать и сессии субагентов. */
+  includeSubagents?: boolean
 }
 
-/** Схема конфигурации строки патча — Schemastery (её DSH читает у экспорта). */
+/** Схема конфигурации для строки патча. */
 export const Config = Schema.object<Config>({
-  allowParallelInProgress: Schema.boolean().required(),
   checkIntervalSeconds: Schema.number().min(5).max(600).default(30),
   staleAfterMinutes: Schema.number().min(0).max(600).default(10),
-  remindAllCompleted: Schema.boolean().default(true),
-  remindMissingList: Schema.boolean().default(true),
-  remindOnlyWhenIdle: Schema.boolean().default(true),
-  diagnostics: Schema.boolean().default(false),
+  curator: Schema.string().default('llm'),
+  llmProvider: Schema.string(),
+  llmModel: Schema.string(),
+  llmMinIntervalSeconds: Schema.number().min(10).max(3600).default(60),
+  llmTimeoutMs: Schema.number().min(1000).max(120000).default(20000),
+  llmMaxOutputTokens: Schema.number().min(64).max(2000).default(400),
+  maxItems: Schema.number().min(1).max(12).default(7),
+  allowParallelInProgress: Schema.boolean().default(true),
+  promoteCompletedOnTurnEnd: Schema.boolean().default(true),
+  includeSubagents: Schema.boolean().default(false),
 })
 
-/** Три допустимых статуса задачи. */
-const STATUSES = ['pending', 'in_progress', 'completed'] as const
+/** Развёрнутые настройки с проверенными значениями. */
+export interface Settings {
+  readonly intervalMs: number
+  readonly staleAfterMinutes: number
+  readonly curator: CuratorMode
+  readonly llmProvider?: string
+  readonly llmModel?: string
+  readonly llmMinIntervalMs: number
+  readonly llmTimeoutMs: number
+  readonly llmMaxOutputTokens: number
+  readonly maxItems: number
+  readonly allowParallel: boolean
+  readonly promoteOnTurnEnd: boolean
+  readonly includeSubagents: boolean
+}
 
-/**
- * Схема проекции `todos` для sessionProjections — строго zod: DSH проверяет
- * сохранённое состояние и клиентское значение вызовом `.parse`. Schemastery
- * здесь не подходит, хотя Config — именно Schemastery.
- */
-const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
-  zod.array(zod.object({
-    content: zod.string(),
-    status: zod.union([zod.literal('pending'), zod.literal('in_progress'), zod.literal('completed')]),
-  })),
-  zod.null(),
-])
+/** Целое в диапазоне. */
+function int(value: unknown, min: number, max: number, fallback: number): number {
+  const number = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback
+  return Math.min(max, Math.max(min, number))
+}
 
-/** Описание инструмента для модели, слово в слово как у штатного todo_write. */
-function describe(allowParallel: boolean): string {
-  return 'Record and update a task list to plan multi-step work and show progress; skip it for trivial '
-    + 'single-step tasks. Add one todo per concrete step before you start. '
-    + (allowParallel
-      ? 'While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. '
-      : 'While work remains, keep exactly one todo `in_progress`. ')
-    + 'Mark each todo `completed` as soon as it is done.'
+/** Булево значение с умолчанием. */
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
 }
 
 /**
- * Проверить и канонизировать список: непустые уникальные описания и не больше
- * одного `in_progress`, если параллельная работа запрещена.
- * @param raw - список от модели.
- * @param allowParallel - разрешена ли параллельная работа.
- * @returns канонический список задач.
+ * Развернуть конфигурацию строки в настройки.
+ * @param config - конфигурация из патча.
+ * @returns настройки с допустимыми значениями.
  */
-function toTodoList(raw: Array<{ content: string; status: string }>, allowParallel: boolean): TodoItem[] {
-  const todos: TodoItem[] = []
-  const seen = new Set<string>()
-  let active = 0
-  for (const item of raw) {
-    const content = item.content.trim()
-    if (content.length === 0) throw new Error('invalid todo: `content` must be a non-empty string')
-    if (seen.has(content)) throw new Error(`invalid todos: duplicate content ${JSON.stringify(content)}`)
-    seen.add(content)
-    if (item.status === 'in_progress') active++
-    todos.push({ content, status: item.status as TodoItem['status'] })
+export function resolveSettings(config: Config = {}): Settings {
+  const provider = typeof config.llmProvider === 'string' && config.llmProvider !== '' ? config.llmProvider : undefined
+  const model = typeof config.llmModel === 'string' && config.llmModel !== '' ? config.llmModel : undefined
+  return {
+    intervalMs: int(config.checkIntervalSeconds, 5, 600, 30) * 1000,
+    staleAfterMinutes: int(config.staleAfterMinutes, 0, 600, 10),
+    curator: config.curator === 'heuristic' ? 'heuristic' : 'llm',
+    ...provider !== undefined && model !== undefined ? { llmProvider: provider, llmModel: model } : {},
+    llmMinIntervalMs: int(config.llmMinIntervalSeconds, 10, 3600, 60) * 1000,
+    llmTimeoutMs: int(config.llmTimeoutMs, 1000, 120_000, 20_000),
+    llmMaxOutputTokens: int(config.llmMaxOutputTokens, 64, 2000, 400),
+    maxItems: int(config.maxItems, 1, 12, 7),
+    allowParallel: bool(config.allowParallelInProgress, true),
+    promoteOnTurnEnd: bool(config.promoteCompletedOnTurnEnd, true),
+    includeSubagents: bool(config.includeSubagents, false),
   }
-  if (!allowParallel && active > 1) {
-    throw new Error(`invalid todos: at most one task may be in_progress (got ${active})`)
-  }
-  return todos
+}
+
+/** Живое лицо агента, которое нужно сторожу. */
+interface AgentFace {
+  readonly id: string
+  readonly status: 'idle' | 'running'
+  readonly session: any
+}
+
+/** Состояние сторожа по одной сессии (только в памяти). */
+interface Track {
+  /** Когда последний раз вызывали модель, мс эпохи. */
+  lastLlmAt: number
+  /** Идёт ли вызов модели сейчас. */
+  busy: boolean
+  /** Отмена вызова при выгрузке агента. */
+  abort?: AbortController
 }
 
 /**
- * Зарегистрировать инструмент `todo_write` и проекцию `todos`.
+ * Запустить сторожа: единый таймер, реакция на конец хода, уборка при выгрузке.
  * @param ctx - контекст плагина.
  * @param config - конфигурация строки патча.
  */
-export async function apply(ctx: Context, config: Config): Promise<void> {
-  const mode = config.mode ?? 'all'
-  if (mode !== 'watcher') await applyTool(ctx, config)
-  if (mode !== 'tool') applyWatcher(ctx as any, config as unknown as WatcherConfig)
-}
+export function apply(ctx: Context, config: Config = {}): void {
+  const settings = resolveSettings(config)
+  const tracks = new Map<string, Track>()
 
-/**
- * Зарегистрировать инструмент `todo_write` и проекцию `todos`.
- * @param ctx - контекст плагина.
- * @param config - конфигурация строки патча.
- */
-async function applyTool(ctx: Context, config: Config): Promise<void> {
-  const allowParallel = config.allowParallelInProgress
-  await ctx.sessionProjections.register<string, TodoItem[] | null>({
-    key: 'todos',
-    stateSchema: todosProjectionSchema,
-    init: () => null,
-    apply: (state, event) => {
-      if (event.type === 'todo/write') return (event.data as { todos: TodoItem[] }).todos
-      if (event.type === 'turn/start') return null
-      return state
-    },
-    wire: { viewSchema: todosProjectionSchema, view: (state: TodoItem[] | null) => state, summary: false },
-    stateVersion: 2,
-  })
-  ctx.tools.register(defineTool({
-    name: 'todo_write',
-    description: describe(allowParallel),
-    parameters: {
-      todos: {
-        type: 'array',
-        required: true,
-        description: 'The COMPLETE task list, replacing any previous list.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            content: { type: 'string', required: true, description: 'What the task is — a short imperative line.' },
-            status: {
-              type: 'string',
-              required: true,
-              enum: [...STATUSES],
-              description: 'pending (not started) | in_progress (now) | completed (done).',
-            },
-          },
-        },
-      },
-    },
-    output: {
-      // Корень схемы результата не может нести `required`: авторы схемы
-      // задают обязательность полей внутри `properties`, компилятор DSH сам
-      // собирает `required` на уровне объекта (как у штатного tool-todo).
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          todos: {
-            type: 'array',
-            required: true,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                content: { type: 'string', required: true },
-                status: { type: 'string', required: true, enum: [...STATUSES] },
-              },
-            },
-          },
-          counts: {
-            type: 'object',
-            additionalProperties: false,
-            required: true,
-            properties: {
-              pending: { type: 'integer', required: true },
-              inProgress: { type: 'integer', required: true },
-              completed: { type: 'integer', required: true },
-            },
-          },
-        },
-      },
-      render: (_args: unknown, value: { counts: { pending: number; inProgress: number; completed: number } }) => [{
-        type: 'text',
-        text: `Updated todo list: ${value.counts.pending} pending, ${value.counts.inProgress} in progress, ${value.counts.completed} completed.`,
-      }],
-    },
-    execute(args: { todos: Array<{ content: string; status: string }> }, exec: { agent?: { session: { append(type: string, data: unknown): unknown } } }) {
-      const todos = toTodoList(args.todos, allowParallel)
-      if (!exec.agent) {
-        // Список принадлежит сессии агента; без неё писать некуда — отвергаем.
-        throw new Error('todo_write requires an owning agent session')
+  const trackOf = (id: string): Track => {
+    let track = tracks.get(id)
+    if (track === undefined) {
+      track = { lastLlmAt: 0, busy: false }
+      tracks.set(id, track)
+    }
+    return track
+  }
+
+  /** Записать список, если он отличается от текущего. */
+  const writeTodos = (agent: AgentFace, view: SessionView, todos: readonly TodoItem[], reason: string): void => {
+    if (todos.length === 0) return
+    if (sameTodos(view.todos, todos)) return
+    agent.session.append('todo/write', {
+      todos: todos.map(item => ({ content: item.content, status: item.status })),
+    })
+    ctx.logger.info(`todo-watch: ${agent.id} — ${reason}, задач ${todos.length}`)
+  }
+
+  /**
+   * Получить формулировки от модели сессии.
+   * @param agent - агент.
+   * @param view - состояние сессии.
+   * @param signal - отмена по таймауту или выгрузке.
+   * @returns список задач или null, если модель недоступна или ответила мусором.
+   */
+  const curateWithModel = async (
+    agent: AgentFace,
+    view: SessionView,
+    signal: AbortSignal,
+  ): Promise<TodoItem[] | null> => {
+    const llm = (ctx as any).get?.('llm')
+    if (llm === undefined || typeof llm.prepareCall !== 'function') return null
+    const route = settings.llmProvider !== undefined && settings.llmModel !== undefined
+      ? { provider: settings.llmProvider, model: settings.llmModel }
+      : (() => {
+        const header = typeof agent.session.requestHeader === 'function' ? agent.session.requestHeader() : undefined
+        const config = header?.config
+        return config === undefined
+          ? null
+          : { provider: String(config.provider), model: String(config.model) }
+      })()
+    if (route === null) return null
+
+    const call = await llm.prepareCall({ ...route, maxTokens: settings.llmMaxOutputTokens }, signal)
+    const options = {
+      ...call.config,
+      messages: [{ role: 'user', content: [{ type: 'text', text: frameInput(view, view.turnOpen) }] }],
+      system: systemPrompt({ maxItems: settings.maxItems, allowParallel: settings.allowParallel }),
+      signal,
+      sessionId: agent.session.id,
+    }
+    let text = ''
+    for await (const chunk of call.stream(options)) {
+      if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
+      if (chunk?.type === 'finish') break
+    }
+    return normalizeTodos(parsePayload(text), {
+      maxItems: settings.maxItems,
+      allowParallel: settings.allowParallel,
+    })
+  }
+
+  /** Обработать одну сессию. */
+  const service = async (agent: AgentFace): Promise<void> => {
+    const track = trackOf(agent.id)
+    if (!settings.includeSubagents && agent.session?.header?.origin === 'subagent') return
+    const view = readView(agent.session)
+    if (view === null) return
+    const decision = planAction(view, Date.now(), {
+      staleAfterMinutes: settings.staleAfterMinutes,
+      promoteOnTurnEnd: settings.promoteOnTurnEnd,
+    })
+    if (decision.action === 'none') return
+
+    if (decision.action === 'promote') {
+      writeTodos(agent, view, (view.todos ?? []).map(item => ({
+        content: item.content,
+        status: 'completed' as const,
+      })), decision.reason)
+      return
+    }
+
+    const now = Date.now()
+    const canUseModel = settings.curator === 'llm'
+      && !track.busy
+      && now - track.lastLlmAt >= settings.llmMinIntervalMs
+    if (canUseModel) {
+      track.busy = true
+      track.lastLlmAt = now
+      const controller = new AbortController()
+      track.abort = controller
+      const timer = setTimeout(() => controller.abort(), settings.llmTimeoutMs)
+      timer.unref?.()
+      try {
+        const curated = await curateWithModel(agent, view, controller.signal)
+        if (curated !== null) {
+          writeTodos(agent, view, curated, decision.reason)
+          return
+        }
+      } catch (error) {
+        ctx.logger.warn(`todo-watch: модель не дала список для ${agent.id}: ${String(error)}`)
+      } finally {
+        clearTimeout(timer)
+        track.busy = false
+        track.abort = undefined
+        if (!tracks.has(agent.id)) return
       }
-      exec.agent.session.append('todo/write', { todos })
-      const count = (status: TodoItem['status']): number => todos.filter(todo => todo.status === status).length
-      return Promise.resolve({
-        todos: todos.map(todo => ({ content: todo.content, status: todo.status })),
-        counts: {
-          pending: count('pending'),
-          inProgress: count('in_progress'),
-          completed: count('completed'),
-        },
-      })
-    },
-    presentCall: (args: { todos: unknown[] }) => ({ card: 'generic', title: 'Update todo list', kind: 'other', rawInput: args.todos }),
-  }))
-}
+    }
 
-/** Плагин по умолчанию — `todo-write`; сторож живёт отдельной строкой. */
-export default { inject, apply }
+    writeTodos(agent, view, heuristicTodos(view, {
+      maxItems: settings.maxItems,
+      allowParallel: settings.allowParallel,
+    }), decision.reason)
+  }
+
+  /** Один проход по всем живым агентам. */
+  const sweep = (): void => {
+    for (const agent of Array.from(ctx.agents as Iterable<AgentFace>)) {
+      void service(agent).catch((error: unknown) => {
+        ctx.logger.warn(`todo-watch: проверка ${agent.id} не удалась: ${String(error)}`)
+      })
+    }
+  }
+
+  // Единый таймер на процесс; не удерживает процесс при завершении DSH.
+  ctx.effect(() => {
+    const timer = setInterval(sweep, settings.intervalMs)
+    timer.unref?.()
+    return () => clearInterval(timer)
+  }, 'todo-watch: таймер проверок')
+
+  // Конец хода: сразу отметить выполненное, не дожидаясь тика.
+  ctx.on<unknown>('session/event', (session: any, event: any) => {
+    if (event?.type !== 'turn/end') return
+    const agent = Array.from(ctx.agents as Iterable<AgentFace>).find(item => item.id === session?.id)
+    if (agent === undefined) return
+    try {
+      const view = readView(agent.session)
+      if (view === null || view.todos === null) return
+      if (!view.todos.some(item => item.status !== 'completed')) return
+      writeTodos(agent, view, view.todos.map(item => ({
+        content: item.content,
+        status: 'completed' as const,
+      })), 'ход завершён')
+    } catch (error) {
+      ctx.logger.warn(`todo-watch: не удалось закрыть список ${agent.id}: ${String(error)}`)
+    }
+  })
+
+  // Выгруженный агент не должен оставить висящий вызов модели.
+  ctx.on<{ agent: AgentFace }>('agent/disposed', (payload: any) => {
+    const id = payload?.agent?.id
+    if (typeof id !== 'string') return
+    tracks.get(id)?.abort?.abort()
+    tracks.delete(id)
+  })
+
+  ctx.logger.info(
+    `todo-watch: проверка раз в ${settings.intervalMs / 1000} с, куратор ${settings.curator}, до ${settings.maxItems} задач`,
+  )
+}
