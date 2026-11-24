@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-todo-watch",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Сторож TODO для DSH: каждые 30 секунд проверяет плашку задач над полем ввода и сам создаёт или обновляет список в живых сессиях.",
