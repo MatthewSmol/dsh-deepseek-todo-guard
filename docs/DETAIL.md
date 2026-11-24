@@ -27,7 +27,8 @@ tool names, whether the turn is still open.
 | no `todo/write` in this turn, no list | create | `в этом ходе списка нет` |
 | no `todo/write` in this turn, list from a previous turn | refresh | `список относится к прошлому ходу` |
 | turn closed, unfinished items remain | promote to `completed` | `ход завершён, есть незавершённые` |
-| list exists but older than `staleAfterMinutes` while working | refresh | `список давно не обновлялся` |
+| the turn is open and the list is older than `refreshSeconds` | refresh | `список обновляется по ходу работы` |
+| the agent is idle and the list is older than `staleAfterMinutes` | refresh | `список давно не обновлялся` |
 | list is fresh | do nothing | `список актуален` |
 
 `turn/end` is handled immediately, without waiting for the tick, so checkmarks
@@ -99,6 +100,7 @@ UI state: it does not wake the agent and does not enter the model context.
 - id: todo-watch
   config:
     checkIntervalSeconds: 30
+    refreshSeconds: 60
     staleAfterMinutes: 10
     curator: llm
     llmProvider: ''            # defaults to the session route
@@ -128,12 +130,15 @@ On every tick the watcher writes `.watch-alive.json` next to the package:
 
 ```json
 { "at": "2026-11-24T05:23:40.689Z", "version": 2, "note": "тик",
-  "intervalMs": 30000, "curator": "llm", "agents": 4, "nudges": 3 }
+  "intervalMs": 30000, "curator": "llm", "agents": 4, "nudges": 3, "projection": "ok" }
 ```
 
 If the file is missing or stale, the previous module is still running: Node caches
 ESM, so a code change needs a `dsh web` restart. `agents` is how many live agents
-the last tick walked; `nudges` is the journal size.
+the last tick walked; `nudges` is the journal size; `projection` is the result of
+the last write check — `ok` means the stock plaque's `todos` projection carries the
+list we just wrote, `missing` means it did not see it, `pending` means nothing has
+been written yet.
 
 ## Limitations
 

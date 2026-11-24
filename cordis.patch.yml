@@ -10,6 +10,7 @@
       name: '@local/dsh-todo-watch'
       config:
         checkIntervalSeconds: 30
+        refreshSeconds: 60
         staleAfterMinutes: 10
         curator: llm
         llmMinIntervalSeconds: 60

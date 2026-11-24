@@ -7,7 +7,7 @@ import { planAction, sameTodos } from '../watch/plan.js'
 import type { SessionView } from '../watch/types.js'
 
 const NOW = 1_800_000_000_000
-const options = { staleAfterMinutes: 10, promoteOnTurnEnd: true }
+const options = { refreshSeconds: 60, staleAfterMinutes: 10, promoteOnTurnEnd: true }
 
 /** Состояние сессии с разумными умолчаниями. */
 function view(overrides: Partial<SessionView> = {}): SessionView {
@@ -78,21 +78,50 @@ test('закрытие на конце хода можно выключить', 
   assert.equal(decision.action, 'none')
 })
 
-test('долго не обновлявшийся список при работе — обновляем', () => {
-  const decision = planAction(view({
+test('идущий ход обновляет список раз в refreshSeconds', () => {
+  const fresh = planAction(view({
     todos: [{ content: 'делаю', status: 'in_progress' }],
     wroteThisTurn: true,
-    writtenAt: NOW - 11 * 60_000,
+    writtenAt: NOW - 30_000,
   }), NOW, options)
-  assert.equal(decision.action, 'refresh')
+  assert.equal(fresh.action, 'none')
+
+  const due = planAction(view({
+    todos: [{ content: 'делаю', status: 'in_progress' }],
+    wroteThisTurn: true,
+    writtenAt: NOW - 61_000,
+  }), NOW, options)
+  assert.equal(due.action, 'refresh')
+  assert.match(due.reason, /по ходу работы/)
 })
 
-test('порог 0 выключает проверку устаревания', () => {
+test('refreshSeconds: 0 отключает обновление идущего хода', () => {
   const decision = planAction(view({
     todos: [{ content: 'делаю', status: 'in_progress' }],
     wroteThisTurn: true,
+    writtenAt: NOW - 10 * 60_000,
+  }), NOW, { ...options, refreshSeconds: 0 })
+  assert.equal(decision.action, 'none')
+})
+
+test('простой: список обновляется по staleAfterMinutes', () => {
+  const decision = planAction(view({
+    todos: [{ content: 'делаю', status: 'in_progress' }],
+    wroteThisTurn: true,
+    turnOpen: false,
+    writtenAt: NOW - 11 * 60_000,
+  }), NOW, { ...options, promoteOnTurnEnd: false })
+  assert.equal(decision.action, 'refresh')
+  assert.match(decision.reason, /давно не обновлялся/)
+})
+
+test('простой: порог 0 выключает проверку устаревания', () => {
+  const decision = planAction(view({
+    todos: [{ content: 'делаю', status: 'in_progress' }],
+    wroteThisTurn: true,
+    turnOpen: false,
     writtenAt: NOW - 10 * 60 * 60_000,
-  }), NOW, { ...options, staleAfterMinutes: 0 })
+  }), NOW, { ...options, staleAfterMinutes: 0, promoteOnTurnEnd: false })
   assert.equal(decision.action, 'none')
 })
 

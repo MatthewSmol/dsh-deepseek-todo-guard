@@ -57,7 +57,8 @@ npm install && npm run build
 - id: todo-watch
   config:
     checkIntervalSeconds: 30    # 5–600
-    staleAfterMinutes: 10       # 0 — не считать список устаревшим
+    refreshSeconds: 60          # обновлять идущий ход так часто (15–600)
+    staleAfterMinutes: 10       # 0 — не считать список устаревшим на простое
     curator: llm                # llm | heuristic
     llmProvider: ''             # по умолчанию маршрут сессии
     llmModel: ''

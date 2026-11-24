@@ -42,7 +42,9 @@ export type CuratorMode = 'llm' | 'heuristic'
 export interface Config {
   /** Интервал проверки в секундах (5–600). */
   checkIntervalSeconds?: number
-  /** Считать список устаревшим через столько минут (0 — не считать). */
+  /** Обновлять список идущего хода не реже, чем раз в столько секунд (15–600). */
+  refreshSeconds?: number
+  /** Считать список устаревшим через столько минут простоя (0 — не считать). */
   staleAfterMinutes?: number
   /** Источник формулировок: модель сессии или эвристика. */
   curator?: CuratorMode
@@ -71,6 +73,7 @@ export interface Config {
 /** Схема конфигурации для строки патча. */
 export const Config = Schema.object<Config>({
   checkIntervalSeconds: Schema.number().min(5).max(600).default(30),
+  refreshSeconds: Schema.number().min(15).max(600).default(60),
   staleAfterMinutes: Schema.number().min(0).max(600).default(10),
   curator: Schema.string().default('llm'),
   llmProvider: Schema.string(),
@@ -88,6 +91,7 @@ export const Config = Schema.object<Config>({
 /** Развёрнутые настройки с проверенными значениями. */
 export interface Settings {
   readonly intervalMs: number
+  readonly refreshSeconds: number
   readonly staleAfterMinutes: number
   readonly curator: CuratorMode
   readonly llmProvider?: string
@@ -123,6 +127,7 @@ export function resolveSettings(config: Config = {}): Settings {
   const model = typeof config.llmModel === 'string' && config.llmModel !== '' ? config.llmModel : undefined
   return {
     intervalMs: int(config.checkIntervalSeconds, 5, 600, 30) * 1000,
+    refreshSeconds: int(config.refreshSeconds, 15, 600, 60),
     staleAfterMinutes: int(config.staleAfterMinutes, 0, 600, 10),
     curator: config.curator === 'heuristic' ? 'heuristic' : 'llm',
     ...provider !== undefined && model !== undefined ? { llmProvider: provider, llmModel: model } : {},
@@ -205,6 +210,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         curator: settings.curator,
         agents: listAgents(ctx.agents).length,
         nudges: journal.size(),
+        projection: shared.projection,
       }
       writeFileSync(new URL('../.watch-alive.json', import.meta.url), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
     } catch { /* маячок не должен мешать работе */ }
@@ -253,6 +259,17 @@ export function apply(ctx: Context, config: Config = {}): void {
       reason,
     })
     shared.lastWritten.set(agent.id, signature)
+    // Сверка с проекцией `todos`: если штатная плашка не увидела запись, это
+    // видно в маячке, иначе причину «плашки нет» не отличить от «нечего писать».
+    try {
+      const projections = (ctx as any).get?.('sessionProjections')
+      const state = typeof projections?.stateOf === 'function'
+        ? projections.stateOf(agent.session, 'todos')
+        : undefined
+      shared.projection = Array.isArray(state) && keyOf(state as TodoItem[]) === signature ? 'ok' : 'missing'
+    } catch {
+      shared.projection = 'missing'
+    }
     ctx.logger.info(`todo-watch: ${agent.id} — ${reason}, задач ${todos.length}`)
   }
 
@@ -307,6 +324,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const view = readView(agent.session)
     if (view === null) return
     const decision = planAction(view, Date.now(), {
+      refreshSeconds: settings.refreshSeconds,
       staleAfterMinutes: settings.staleAfterMinutes,
       promoteOnTurnEnd: settings.promoteOnTurnEnd,
     })
@@ -356,12 +374,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   /** Один проход по всем живым агентам. */
   const sweep = (): void => {
     const agents = listAgents(ctx.agents) as AgentFace[]
-    for (const agent of agents) {
-      void service(agent).catch((error: unknown) => {
-        ctx.logger.warn(`todo-watch: проверка ${agent.id} не удалась: ${String(error)}`)
-      })
-    }
-    beacon('тик')
+    const running = agents.map(agent => service(agent).catch((error: unknown) => {
+      ctx.logger.warn(`todo-watch: проверка ${agent.id} не удалась: ${String(error)}`)
+    }))
+    // Маячок пишется после проверок: в нём должен быть итог этого тика,
+    // включая сверку с проекцией `todos`.
+    void Promise.allSettled(running).then(() => beacon('тик'))
   }
 
   // Единый таймер на процесс; не удерживает процесс при завершении DSH.

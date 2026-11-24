@@ -58,7 +58,8 @@ applied at server start only.
 - id: todo-watch
   config:
     checkIntervalSeconds: 30    # 5–600
-    staleAfterMinutes: 10       # 0 — never treat a list as stale
+    refreshSeconds: 60          # refresh a running turn this often (15–600)
+    staleAfterMinutes: 10       # 0 — never treat an idle list as stale
     curator: llm                # llm | heuristic
     llmProvider: ''             # defaults to the session route
     llmModel: ''

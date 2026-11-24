@@ -7,7 +7,9 @@ import type { PlanDecision, SessionView } from './types.js'
 
 /** Настройки, влияющие на решение (подмножество конфига плагина). */
 export interface PlanOptions {
-  /** Считать список устаревшим через столько минут (0 — не считать). */
+  /** Обновлять список идущего хода не реже, чем раз в столько секунд (0 — не обновлять). */
+  readonly refreshSeconds: number
+  /** Считать список устаревшим через столько минут, когда агент простаивает (0 — не считать). */
   readonly staleAfterMinutes: number
   /** Отмечать выполненное при завершении хода. */
   readonly promoteOnTurnEnd: boolean
@@ -41,10 +43,14 @@ export function planAction(view: SessionView, now: number, options: PlanOptions)
     return { action: 'promote', reason: 'ход завершён, есть незавершённые' }
   }
 
-  if (
-    view.turnOpen && options.staleAfterMinutes > 0
-    && now - view.writtenAt >= options.staleAfterMinutes * 60_000
-  ) {
+  // Идущий ход: список должен следовать за работой, а не ждать десять минут.
+  if (view.turnOpen && options.refreshSeconds > 0 && now - view.writtenAt >= options.refreshSeconds * 1000) {
+    return { action: 'refresh', reason: 'список обновляется по ходу работы' }
+  }
+
+  // Простой: список мог остаться от прошлого хода и потерять актуальность.
+  if (!view.turnOpen && options.staleAfterMinutes > 0
+    && now - view.writtenAt >= options.staleAfterMinutes * 60_000) {
     return { action: 'refresh', reason: 'список давно не обновлялся' }
   }
 

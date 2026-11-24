@@ -42,7 +42,8 @@ async function tick(ctx: any, config: any = {}): Promise<void> {
   try {
     apply(ctx, { checkIntervalSeconds: 5, ...config })
     timers[0]?.()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    // Ждём завершения асинхронной проверки и записи маячка.
+    await new Promise(resolve => setTimeout(resolve, 60))
   } finally {
     globalThis.setInterval = realSetInterval
   }
@@ -190,6 +191,23 @@ test('журнал: тик создаёт запись с действием и 
   assert.equal(entry.source, 'heuristic')
   assert.equal(entry.items, 1)
   assert.equal(typeof entry.reason, 'string')
+})
+
+test('маячок сообщает итог сверки с проекцией todos', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { appended, agent } = fakeAgent(eventsWithTurn)
+  // Подставная проекция отдаёт ровно то, что записали, — сверка должна пройти.
+  let last: any = null
+  const ctx: any = fakeContext({ list: () => [agent] })
+  const originalAppend = agent.session.append
+  ;(agent.session as any).append = (type: string, data: any) => { last = data.todos; originalAppend(type, data) }
+  ctx.get = (name: string) => name === 'sessionProjections' ? { stateOf: () => last } : undefined
+  await tick(ctx)
+  assert.equal(appended.length, 1)
+  const beacon = JSON.parse(await readFile(new URL('../../.watch-alive.json', import.meta.url), 'utf8'))
+  assert.equal(beacon.projection, 'ok')
+  assert.equal(beacon.nudges, 1)
+  assert.equal(beacon.agents, 1)
 })
 
 test('модель недоступна — список всё равно появляется', async () => {
